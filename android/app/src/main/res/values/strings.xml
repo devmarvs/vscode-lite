@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Lite VS Code</string>
+    <string name="title_activity_main">Lite VS Code</string>
+    <string name="package_name">com.litevscode.app</string>
+    <string name="custom_url_scheme">com.litevscode.app</string>
+</resources>
