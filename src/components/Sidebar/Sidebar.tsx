@@ -94,7 +94,7 @@ export const Sidebar: React.FC = () => {
 
   return (
     <div
-      className="w-64 h-full border-r border-vscode-border flex flex-col shrink-0 absolute top-0 left-0 md:relative z-50 shadow-2xl md:shadow-none pt-[env(safe-area-inset-top)]"
+      className="w-full md:w-64 h-full border-r border-vscode-border flex flex-col shrink-0 absolute top-0 left-0 md:relative z-50 shadow-2xl md:shadow-none pt-[env(safe-area-inset-top)]"
       style={{ backgroundColor: '#252526' }}
     >
       {activeActivityBarItem === 'explorer' && <Explorer />}

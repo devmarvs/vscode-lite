@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useFileStore } from '../../store/useFileStore';
-import { ArrowRight, CaseSensitive, Regex, WholeWord } from 'lucide-react';
+import { ArrowRight, CaseSensitive, Regex, WholeWord, X } from 'lucide-react';
 
 export const Search: React.FC = () => {
-  const { files, setActiveFile } = useFileStore();
+  const { files, setActiveFile, setSidebarVisible } = useFileStore();
   const [query, setQuery] = useState('');
 
   const results = query 
@@ -12,7 +12,12 @@ export const Search: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full text-vscode-text">
-      <div className="px-4 py-2 text-xs font-bold uppercase tracking-wider">Search</div>
+      <div className="px-4 py-2 text-xs font-bold uppercase tracking-wider flex justify-between items-center">
+        <span>Search</span>
+        <button onClick={() => setSidebarVisible(false)} className="md:hidden hover:text-white transition-colors duration-150 p-1 hover:bg-white/10 rounded">
+          <X size={16} />
+        </button>
+      </div>
       <div className="px-4 pb-2">
         <div className="relative">
           <input

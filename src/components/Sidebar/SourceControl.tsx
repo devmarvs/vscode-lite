@@ -1,12 +1,17 @@
 import React from 'react';
-import { GitCommit, RefreshCw, Check, Plus, MoreHorizontal } from 'lucide-react';
+import { GitCommit, RefreshCw, Check, Plus, MoreHorizontal, X } from 'lucide-react';
+import { useFileStore } from '../../store/useFileStore';
 
 export const SourceControl: React.FC = () => {
+  const { setSidebarVisible } = useFileStore();
   return (
     <div className="flex flex-col h-full text-vscode-text">
       <div className="px-4 py-2 flex items-center justify-between">
         <span className="text-xs font-bold uppercase tracking-wider">Source Control</span>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+           <button onClick={() => setSidebarVisible(false)} className="md:hidden hover:text-white transition-colors duration-150 p-1 hover:bg-white/10 rounded mr-2">
+             <X size={16} />
+           </button>
            <RefreshCw size={14} className="hover:text-white cursor-pointer" />
            <Check size={14} className="hover:text-white cursor-pointer" />
            <MoreHorizontal size={14} className="hover:text-white cursor-pointer" />
