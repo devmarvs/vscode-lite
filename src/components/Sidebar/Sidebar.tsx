@@ -4,6 +4,7 @@ import { FileCode, FilePlus, Trash2, X } from 'lucide-react';
 import { Search } from './Search';
 import { SourceControl } from './SourceControl';
 import { Extensions } from './Extensions';
+import { Settings } from './Settings';
 import clsx from 'clsx';
 
 const Explorer: React.FC = () => {
@@ -101,7 +102,7 @@ export const Sidebar: React.FC = () => {
       {activeActivityBarItem === 'search' && <Search />}
       {activeActivityBarItem === 'git' && <SourceControl />}
       {activeActivityBarItem === 'extensions' && <Extensions />}
-      {activeActivityBarItem === 'settings' && <div className="p-4 text-sm text-gray-400">Settings not implemented</div>}
+      {activeActivityBarItem === 'settings' && <Settings />}
     </div>
   );
 };

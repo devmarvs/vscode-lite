@@ -1,27 +1,15 @@
 import React from 'react';
-import Editor, { type OnMount } from '@monaco-editor/react';
+import Editor from '@monaco-editor/react';
 import { useFileStore } from '../../store/useFileStore';
 
 export const CodeEditor: React.FC = () => {
-  const { files, activeFileId, updateFileContent } = useFileStore();
+  const { files, activeFileId, updateFileContent, editorSettings } = useFileStore();
   const activeFile = files.find(f => f.id === activeFileId);
 
   const handleEditorChange = (value: string | undefined) => {
     if (activeFileId && value !== undefined) {
       updateFileContent(activeFileId, value);
     }
-  };
-
-  const handleEditorDidMount: OnMount = (editor) => {
-    // Configure Monaco for mobile/touch
-    editor.updateOptions({
-      minimap: { enabled: false }, // Save space on mobile
-      wordWrap: 'on',
-      fontSize: 14,
-      padding: { top: 16 },
-      automaticLayout: true,
-      contextmenu: true, // Useful on mobile
-    });
   };
 
   if (!activeFile) {
@@ -45,12 +33,17 @@ export const CodeEditor: React.FC = () => {
         language={activeFile.language}
         value={activeFile.content}
         onChange={handleEditorChange}
-        onMount={handleEditorDidMount}
         options={{
-          minimap: { enabled: false },
-          fontSize: 14,
+          minimap: { enabled: editorSettings.minimap },
+          fontSize: editorSettings.fontSize,
+          wordWrap: editorSettings.wordWrap ? 'on' : 'off',
+          lineNumbers: editorSettings.lineNumbers ? 'on' : 'off',
+          tabSize: editorSettings.tabSize,
+          renderWhitespace: editorSettings.renderWhitespace,
           scrollBeyondLastLine: false,
           automaticLayout: true,
+          padding: { top: 16 },
+          contextmenu: true,
         }}
       />
     </div>
