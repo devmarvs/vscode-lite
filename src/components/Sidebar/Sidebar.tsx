@@ -5,6 +5,7 @@ import { Search } from './Search';
 import { SourceControl } from './SourceControl';
 import { Extensions } from './Extensions';
 import { Settings } from './Settings';
+import { CodexPanel } from '../Codex/CodexPanel';
 import clsx from 'clsx';
 
 const Explorer: React.FC = () => {
@@ -102,6 +103,7 @@ export const Sidebar: React.FC = () => {
       {activeActivityBarItem === 'search' && <Search />}
       {activeActivityBarItem === 'git' && <SourceControl />}
       {activeActivityBarItem === 'extensions' && <Extensions />}
+      {activeActivityBarItem === 'codex' && <CodexPanel />}
       {activeActivityBarItem === 'settings' && <Settings />}
     </div>
   );

@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useFileStore } from '../../store/useFileStore';
 import { Search } from 'lucide-react';
+import { isCodexInstalled } from '../../utils/codex';
 
 export const CommandPalette: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const { files, setActiveFile, addFile, toggleTerminal, toggleSidebar } = useFileStore();
+  const { files, setActiveFile, addFile, toggleTerminal, toggleSidebar, openCodexModal, installedExtensions } = useFileStore();
+  const codexInstalled = isCodexInstalled(installedExtensions);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -27,6 +29,7 @@ export const CommandPalette: React.FC = () => {
   const filteredFiles = files.filter(f => f.name.toLowerCase().includes(query.toLowerCase()));
   
   const commands = [
+    ...(codexInstalled ? [{ name: 'Codex: Ask', action: () => openCodexModal() }] : []),
     { name: 'Toggle Terminal', action: () => toggleTerminal() },
     { name: 'Toggle Sidebar', action: () => toggleSidebar() },
     { name: 'New File', action: () => {

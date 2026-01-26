@@ -2,15 +2,19 @@ import React from 'react';
 import { Sidebar } from '../Sidebar/Sidebar';
 import { CodeEditor } from '../Editor/CodeEditor';
 import { CommandPalette } from '../CommandPalette/CommandPalette';
+import { CodexDrawer } from '../Codex/CodexDrawer';
+import { CodexModal } from '../Codex/CodexModal';
 import { StatusBar } from '../StatusBar/StatusBar';
 import { Terminal } from '../Terminal/Terminal';
 import { Tabs } from '../Tabs/Tabs';
 import { useFileStore, type ActivityBarItem } from '../../store/useFileStore';
-import { Search, Settings, Files, GitBranch, Puzzle } from 'lucide-react';
+import { Search, Settings, Files, GitBranch, Puzzle, Sparkles } from 'lucide-react';
 import clsx from 'clsx';
+import { isCodexInstalled } from '../../utils/codex';
 
 export const Layout: React.FC = () => {
-  const { toggleSidebar, sidebarVisible, activeActivityBarItem, setActiveActivityBarItem } = useFileStore();
+  const { toggleSidebar, sidebarVisible, activeActivityBarItem, setActiveActivityBarItem, installedExtensions } = useFileStore();
+  const codexInstalled = isCodexInstalled(installedExtensions);
 
   const handleActivityClick = (item: ActivityBarItem) => {
     if (activeActivityBarItem === item && sidebarVisible) {
@@ -23,6 +27,7 @@ export const Layout: React.FC = () => {
   return (
     <div className="fixed inset-0 w-full h-full bg-vscode-bg text-vscode-text overflow-hidden flex flex-col">
       <CommandPalette />
+      <CodexModal />
 
       <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Activity Bar */}
@@ -75,6 +80,20 @@ export const Layout: React.FC = () => {
               <div className="absolute left-0 top-1 bottom-1 w-[2px] bg-white rounded-r" />
             )}
           </button>
+          {codexInstalled && (
+            <button
+              onClick={() => handleActivityClick('codex')}
+              className={clsx(
+                "text-gray-400 hover:text-white p-2.5 relative rounded transition-all duration-150",
+                activeActivityBarItem === 'codex' && sidebarVisible && "text-white bg-white/5"
+              )}
+            >
+              <Sparkles size={24} strokeWidth={1.5} />
+              {activeActivityBarItem === 'codex' && sidebarVisible && (
+                <div className="absolute left-0 top-1 bottom-1 w-[2px] bg-white rounded-r" />
+              )}
+            </button>
+          )}
           <div className="flex-1" />
           <button
             onClick={() => handleActivityClick('settings')}
@@ -106,6 +125,8 @@ export const Layout: React.FC = () => {
               onClick={toggleSidebar}
             />
           )}
+
+          <CodexDrawer />
         </div>
       </div>
 

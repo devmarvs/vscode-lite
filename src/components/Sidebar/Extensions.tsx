@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Download, Loader2 } from 'lucide-react';
+import { useFileStore } from '../../store/useFileStore';
+import { isCodexExtensionId } from '../../utils/codex';
 
 interface Extension {
   name: string;
@@ -18,18 +20,10 @@ export const Extensions: React.FC = () => {
   const [extensions, setExtensions] = useState<Extension[]>([]);
   const [loading, setLoading] = useState(false);
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const { installedExtensions, installExtension, uninstallExtension, setActiveActivityBarItem } = useFileStore();
 
   // Track installation state
   const [installing, setInstalling] = useState<Record<string, boolean>>({});
-  const [installed, setInstalled] = useState<Record<string, boolean>>(() => {
-    const saved = localStorage.getItem('installed_extensions');
-    return saved ? JSON.parse(saved) : {};
-  });
-
-  // Save installed extensions
-  useEffect(() => {
-    localStorage.setItem('installed_extensions', JSON.stringify(installed));
-  }, [installed]);
 
   // Debounce search input
   useEffect(() => {
@@ -72,25 +66,21 @@ export const Extensions: React.FC = () => {
 
   const handleInstall = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (installed[id]) return;
+    if (installedExtensions[id]) return;
 
     setInstalling(prev => ({ ...prev, [id]: true }));
 
     // Simulate installation
     setTimeout(() => {
       setInstalling(prev => ({ ...prev, [id]: false }));
-      setInstalled(prev => ({ ...prev, [id]: true }));
+      installExtension(id);
     }, 1500);
   };
 
   const handleUninstall = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (window.confirm('Are you sure you want to uninstall this extension?')) {
-      setInstalled(prev => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
+      uninstallExtension(id);
     }
   };
 
@@ -127,8 +117,10 @@ export const Extensions: React.FC = () => {
         ) : (
           extensions.map((ext, index) => {
             const id = `${ext.namespace}.${ext.name}`;
-            const isInstalled = installed[id];
+            const isInstalled = installedExtensions[id];
             const isInstalling = installing[id];
+            const displayName = ext.displayName || ext.name;
+            const isCodex = isCodexExtensionId(id) || displayName.toLowerCase().includes('codex');
 
             return (
               <div key={`${id}-${index}`} className="px-3 py-2.5 hover:bg-vscode-hover cursor-pointer flex gap-3 border-b border-vscode-border/20 group items-center transition-colors duration-150">
@@ -167,13 +159,24 @@ export const Extensions: React.FC = () => {
                 {/* Install/Uninstall Button */}
                 <div className="shrink-0 flex items-center">
                   {isInstalled ? (
-                    <button
-                      onClick={(e) => handleUninstall(id, e)}
-                      className="h-6 px-2.5 flex items-center justify-center bg-transparent text-gray-400 text-xs rounded border border-vscode-border hover:bg-vscode-hover hover:text-white hover:border-gray-500 transition-all duration-150"
-                      title="Uninstall"
-                    >
-                      Installed
-                    </button>
+                    <div className="flex items-center gap-1">
+                      {isCodex && (
+                        <button
+                          onClick={() => setActiveActivityBarItem('codex')}
+                          className="h-6 px-2.5 flex items-center justify-center bg-vscode-statusBar text-white text-xs rounded hover:bg-blue-500 transition-all duration-150"
+                          title="Open Codex"
+                        >
+                          Open
+                        </button>
+                      )}
+                      <button
+                        onClick={(e) => handleUninstall(id, e)}
+                        className="h-6 px-2.5 flex items-center justify-center bg-transparent text-gray-400 text-xs rounded border border-vscode-border hover:bg-vscode-hover hover:text-white hover:border-gray-500 transition-all duration-150"
+                        title="Uninstall"
+                      >
+                        Installed
+                      </button>
+                    </div>
                   ) : (
                     <button
                       onClick={(e) => handleInstall(id, e)}

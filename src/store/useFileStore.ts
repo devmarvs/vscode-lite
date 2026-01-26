@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type ActivityBarItem = 'explorer' | 'search' | 'git' | 'extensions' | 'settings';
+export type ActivityBarItem = 'explorer' | 'search' | 'git' | 'extensions' | 'settings' | 'codex';
 
 export type EditorWhitespace = 'none' | 'boundary' | 'all';
 
@@ -23,6 +23,7 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
 };
 
 const SETTINGS_STORAGE_KEY = 'lite_vscode_editor_settings';
+const EXTENSIONS_STORAGE_KEY = 'installed_extensions';
 
 const normalizeEditorSettings = (settings: Partial<EditorSettings>): EditorSettings => {
   const fontSizeRaw = typeof settings.fontSize === 'number' ? settings.fontSize : DEFAULT_EDITOR_SETTINGS.fontSize;
@@ -70,11 +71,43 @@ const persistEditorSettings = (settings: EditorSettings) => {
   }
 };
 
+const loadInstalledExtensions = (): Record<string, boolean> => {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const stored = window.localStorage.getItem(EXTENSIONS_STORAGE_KEY);
+    return stored ? (JSON.parse(stored) as Record<string, boolean>) : {};
+  } catch {
+    return {};
+  }
+};
+
+const persistInstalledExtensions = (extensions: Record<string, boolean>) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(EXTENSIONS_STORAGE_KEY, JSON.stringify(extensions));
+  } catch {
+    // Ignore storage failures.
+  }
+};
+
 export interface File {
   id: string;
   name: string;
   content: string;
   language: string;
+}
+
+export interface CodexMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
 }
 
 interface FileStore {
@@ -84,6 +117,10 @@ interface FileStore {
   terminalOpen: boolean;
   activeActivityBarItem: ActivityBarItem;
   editorSettings: EditorSettings;
+  installedExtensions: Record<string, boolean>;
+  codexDrawerOpen: boolean;
+  codexModalOpen: boolean;
+  codexMessages: CodexMessage[];
   
   // Actions
   addFile: (name: string, language: string) => void;
@@ -96,6 +133,14 @@ interface FileStore {
   setActiveActivityBarItem: (item: ActivityBarItem) => void;
   updateEditorSettings: (settings: Partial<EditorSettings>) => void;
   resetEditorSettings: () => void;
+  installExtension: (id: string) => void;
+  uninstallExtension: (id: string) => void;
+  toggleCodexDrawer: () => void;
+  setCodexDrawerOpen: (open: boolean) => void;
+  openCodexModal: () => void;
+  closeCodexModal: () => void;
+  addCodexMessage: (message: CodexMessage) => void;
+  clearCodexMessages: () => void;
 }
 
 const initialFiles: File[] = [
@@ -134,6 +179,10 @@ export const useFileStore = create<FileStore>((set) => ({
   terminalOpen: false,
   activeActivityBarItem: 'explorer',
   editorSettings: loadEditorSettings(),
+  installedExtensions: loadInstalledExtensions(),
+  codexDrawerOpen: false,
+  codexModalOpen: false,
+  codexMessages: [],
 
   addFile: (name, language) => set((state) => {
     const newFile: File = {
@@ -175,4 +224,29 @@ export const useFileStore = create<FileStore>((set) => ({
     persistEditorSettings(next);
     return { editorSettings: next };
   }),
+
+  installExtension: (id) => set((state) => {
+    const next = { ...state.installedExtensions, [id]: true };
+    persistInstalledExtensions(next);
+    return { installedExtensions: next };
+  }),
+
+  uninstallExtension: (id) => set((state) => {
+    const next = { ...state.installedExtensions };
+    delete next[id];
+    persistInstalledExtensions(next);
+    return { installedExtensions: next };
+  }),
+
+  toggleCodexDrawer: () => set((state) => ({ codexDrawerOpen: !state.codexDrawerOpen })),
+
+  setCodexDrawerOpen: (open) => set({ codexDrawerOpen: open }),
+
+  openCodexModal: () => set({ codexModalOpen: true }),
+
+  closeCodexModal: () => set({ codexModalOpen: false }),
+
+  addCodexMessage: (message) => set((state) => ({ codexMessages: [...state.codexMessages, message] })),
+
+  clearCodexMessages: () => set({ codexMessages: [] }),
 }));
