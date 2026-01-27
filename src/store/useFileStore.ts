@@ -22,8 +22,19 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   renderWhitespace: 'boundary',
 };
 
+export interface CodexSettings {
+  model: string;
+}
+
+export const DEFAULT_CODEX_SETTINGS: CodexSettings = {
+  model: 'gpt-5.1-codex',
+};
+
 const SETTINGS_STORAGE_KEY = 'lite_vscode_editor_settings';
 const EXTENSIONS_STORAGE_KEY = 'installed_extensions';
+const EXTENSION_METADATA_STORAGE_KEY = 'installed_extension_metadata';
+const CODEX_SETTINGS_STORAGE_KEY = 'lite_vscode_codex_settings';
+const CODEX_API_KEY_SESSION_KEY = 'lite_vscode_codex_api_key';
 
 const normalizeEditorSettings = (settings: Partial<EditorSettings>): EditorSettings => {
   const fontSizeRaw = typeof settings.fontSize === 'number' ? settings.fontSize : DEFAULT_EDITOR_SETTINGS.fontSize;
@@ -84,6 +95,87 @@ const loadInstalledExtensions = (): Record<string, boolean> => {
   }
 };
 
+const loadCodexSettings = (): CodexSettings => {
+  if (typeof window === 'undefined') {
+    return { ...DEFAULT_CODEX_SETTINGS };
+  }
+
+  try {
+    const stored = window.localStorage.getItem(CODEX_SETTINGS_STORAGE_KEY);
+    if (!stored) {
+      return { ...DEFAULT_CODEX_SETTINGS };
+    }
+
+    const parsed = JSON.parse(stored) as Partial<CodexSettings>;
+    const model = typeof parsed.model === 'string' && parsed.model.trim() ? parsed.model.trim() : DEFAULT_CODEX_SETTINGS.model;
+    return { model };
+  } catch {
+    return { ...DEFAULT_CODEX_SETTINGS };
+  }
+};
+
+const persistCodexSettings = (settings: CodexSettings) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(CODEX_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  } catch {
+    // Ignore storage failures.
+  }
+};
+
+const loadCodexApiKey = (): string | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    return window.sessionStorage.getItem(CODEX_API_KEY_SESSION_KEY);
+  } catch {
+    return null;
+  }
+};
+
+const persistCodexApiKey = (key: string | null) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    if (key) {
+      window.sessionStorage.setItem(CODEX_API_KEY_SESSION_KEY, key);
+    } else {
+      window.sessionStorage.removeItem(CODEX_API_KEY_SESSION_KEY);
+    }
+  } catch {
+    // Ignore storage failures.
+  }
+};
+
+export interface InstalledExtensionMetadata {
+  id: string;
+  name?: string;
+  displayName?: string;
+  namespace?: string;
+  version?: string;
+  icon?: string;
+}
+
+const loadInstalledExtensionMetadata = (): Record<string, InstalledExtensionMetadata> => {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const stored = window.localStorage.getItem(EXTENSION_METADATA_STORAGE_KEY);
+    return stored ? (JSON.parse(stored) as Record<string, InstalledExtensionMetadata>) : {};
+  } catch {
+    return {};
+  }
+};
+
 const persistInstalledExtensions = (extensions: Record<string, boolean>) => {
   if (typeof window === 'undefined') {
     return;
@@ -91,6 +183,18 @@ const persistInstalledExtensions = (extensions: Record<string, boolean>) => {
 
   try {
     window.localStorage.setItem(EXTENSIONS_STORAGE_KEY, JSON.stringify(extensions));
+  } catch {
+    // Ignore storage failures.
+  }
+};
+
+const persistInstalledExtensionMetadata = (metadata: Record<string, InstalledExtensionMetadata>) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(EXTENSION_METADATA_STORAGE_KEY, JSON.stringify(metadata));
   } catch {
     // Ignore storage failures.
   }
@@ -118,6 +222,9 @@ interface FileStore {
   activeActivityBarItem: ActivityBarItem;
   editorSettings: EditorSettings;
   installedExtensions: Record<string, boolean>;
+  installedExtensionMetadata: Record<string, InstalledExtensionMetadata>;
+  codexSettings: CodexSettings;
+  codexApiKey: string | null;
   codexDrawerOpen: boolean;
   codexModalOpen: boolean;
   codexMessages: CodexMessage[];
@@ -133,8 +240,11 @@ interface FileStore {
   setActiveActivityBarItem: (item: ActivityBarItem) => void;
   updateEditorSettings: (settings: Partial<EditorSettings>) => void;
   resetEditorSettings: () => void;
-  installExtension: (id: string) => void;
+  installExtension: (id: string, metadata?: InstalledExtensionMetadata) => void;
   uninstallExtension: (id: string) => void;
+  setCodexApiKey: (key: string) => void;
+  clearCodexApiKey: () => void;
+  setCodexModel: (model: string) => void;
   toggleCodexDrawer: () => void;
   setCodexDrawerOpen: (open: boolean) => void;
   openCodexModal: () => void;
@@ -180,6 +290,9 @@ export const useFileStore = create<FileStore>((set) => ({
   activeActivityBarItem: 'explorer',
   editorSettings: loadEditorSettings(),
   installedExtensions: loadInstalledExtensions(),
+  installedExtensionMetadata: loadInstalledExtensionMetadata(),
+  codexSettings: loadCodexSettings(),
+  codexApiKey: loadCodexApiKey(),
   codexDrawerOpen: false,
   codexModalOpen: false,
   codexMessages: [],
@@ -225,17 +338,53 @@ export const useFileStore = create<FileStore>((set) => ({
     return { editorSettings: next };
   }),
 
-  installExtension: (id) => set((state) => {
-    const next = { ...state.installedExtensions, [id]: true };
-    persistInstalledExtensions(next);
-    return { installedExtensions: next };
+  installExtension: (id, metadata) => set((state) => {
+    const nextInstalled = { ...state.installedExtensions, [id]: true };
+    const nextMetadata = metadata
+      ? { ...state.installedExtensionMetadata, [id]: metadata }
+      : state.installedExtensionMetadata;
+
+    persistInstalledExtensions(nextInstalled);
+    if (metadata) {
+      persistInstalledExtensionMetadata(nextMetadata);
+    }
+
+    return {
+      installedExtensions: nextInstalled,
+      installedExtensionMetadata: nextMetadata,
+    };
   }),
 
   uninstallExtension: (id) => set((state) => {
-    const next = { ...state.installedExtensions };
-    delete next[id];
-    persistInstalledExtensions(next);
-    return { installedExtensions: next };
+    const nextInstalled = { ...state.installedExtensions };
+    delete nextInstalled[id];
+
+    const nextMetadata = { ...state.installedExtensionMetadata };
+    if (nextMetadata[id]) {
+      delete nextMetadata[id];
+      persistInstalledExtensionMetadata(nextMetadata);
+    }
+
+    persistInstalledExtensions(nextInstalled);
+    return { installedExtensions: nextInstalled, installedExtensionMetadata: nextMetadata };
+  }),
+
+  setCodexApiKey: (key) => {
+    const trimmed = key.trim();
+    persistCodexApiKey(trimmed || null);
+    set({ codexApiKey: trimmed || null });
+  },
+
+  clearCodexApiKey: () => {
+    persistCodexApiKey(null);
+    set({ codexApiKey: null });
+  },
+
+  setCodexModel: (model) => set((state) => {
+    const trimmed = model.trim() || DEFAULT_CODEX_SETTINGS.model;
+    const next = { ...state.codexSettings, model: trimmed };
+    persistCodexSettings(next);
+    return { codexSettings: next };
   }),
 
   toggleCodexDrawer: () => set((state) => ({ codexDrawerOpen: !state.codexDrawerOpen })),

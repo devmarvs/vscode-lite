@@ -8,13 +8,15 @@ import { StatusBar } from '../StatusBar/StatusBar';
 import { Terminal } from '../Terminal/Terminal';
 import { Tabs } from '../Tabs/Tabs';
 import { useFileStore, type ActivityBarItem } from '../../store/useFileStore';
-import { Search, Settings, Files, GitBranch, Puzzle, Sparkles } from 'lucide-react';
+import { Search, Settings, Files, GitBranch, Puzzle } from 'lucide-react';
 import clsx from 'clsx';
-import { isCodexInstalled } from '../../utils/codex';
+import { getCodexExtensionMetadata, isCodexInstalled } from '../../utils/codex';
+import { CodexIcon } from '../Codex/CodexIcon';
 
 export const Layout: React.FC = () => {
-  const { toggleSidebar, sidebarVisible, activeActivityBarItem, setActiveActivityBarItem, installedExtensions } = useFileStore();
+  const { toggleSidebar, sidebarVisible, activeActivityBarItem, setActiveActivityBarItem, installedExtensions, installedExtensionMetadata } = useFileStore();
   const codexInstalled = isCodexInstalled(installedExtensions);
+  const codexMetadata = getCodexExtensionMetadata(installedExtensionMetadata);
 
   const handleActivityClick = (item: ActivityBarItem) => {
     if (activeActivityBarItem === item && sidebarVisible) {
@@ -88,7 +90,7 @@ export const Layout: React.FC = () => {
                 activeActivityBarItem === 'codex' && sidebarVisible && "text-white bg-white/5"
               )}
             >
-              <Sparkles size={24} strokeWidth={1.5} />
+              <CodexIcon iconUrl={codexMetadata?.icon} size={24} className="text-white" />
               {activeActivityBarItem === 'codex' && sidebarVisible && (
                 <div className="absolute left-0 top-1 bottom-1 w-[2px] bg-white rounded-r" />
               )}

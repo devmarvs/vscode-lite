@@ -1,12 +1,14 @@
 import React from 'react';
 import clsx from 'clsx';
-import { GitBranch, Bell, AlertTriangle, Sparkles } from 'lucide-react';
+import { GitBranch, Bell, AlertTriangle } from 'lucide-react';
 import { useFileStore } from '../../store/useFileStore';
-import { isCodexInstalled } from '../../utils/codex';
+import { getCodexExtensionMetadata, isCodexInstalled } from '../../utils/codex';
+import { CodexIcon } from '../Codex/CodexIcon';
 
 export const StatusBar: React.FC = () => {
-  const { installedExtensions, toggleCodexDrawer, codexDrawerOpen } = useFileStore();
+  const { installedExtensions, installedExtensionMetadata, toggleCodexDrawer, codexDrawerOpen } = useFileStore();
   const codexInstalled = isCodexInstalled(installedExtensions);
+  const codexMetadata = getCodexExtensionMetadata(installedExtensionMetadata);
 
   return (
     <div className="h-6 bg-vscode-statusBar text-white flex items-center justify-between px-3 text-xs select-none shrink-0 z-40">
@@ -41,7 +43,7 @@ export const StatusBar: React.FC = () => {
             )}
             onClick={toggleCodexDrawer}
           >
-            <Sparkles size={12} />
+            <CodexIcon iconUrl={codexMetadata?.icon} size={12} className="text-white" strokeWidth={1.25} />
             <span className="hidden sm:block">Codex</span>
           </div>
         )}
