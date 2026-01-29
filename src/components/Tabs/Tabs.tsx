@@ -2,9 +2,17 @@ import React from 'react';
 import { useFileStore } from '../../store/useFileStore';
 import { X } from 'lucide-react';
 import clsx from 'clsx';
+import { useShallow } from 'zustand/shallow';
 
 export const Tabs: React.FC = () => {
-  const { files, activeFileId, setActiveFile, deleteFile } = useFileStore();
+  const { files, activeFileId, setActiveFile, deleteFile } = useFileStore(
+    useShallow((state) => ({
+      files: state.files,
+      activeFileId: state.activeFileId,
+      setActiveFile: state.setActiveFile,
+      deleteFile: state.deleteFile,
+    }))
+  );
 
   return (
     <div className="h-9 bg-[#252526] flex items-center overflow-x-auto no-scrollbar border-b border-vscode-border">

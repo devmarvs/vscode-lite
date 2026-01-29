@@ -12,9 +12,19 @@ import { Search, Settings, Files, GitBranch, Puzzle } from 'lucide-react';
 import clsx from 'clsx';
 import { getCodexExtensionMetadata, isCodexInstalled } from '../../utils/codex';
 import { CodexIcon } from '../Codex/CodexIcon';
+import { useShallow } from 'zustand/shallow';
 
 export const Layout: React.FC = () => {
-  const { toggleSidebar, sidebarVisible, activeActivityBarItem, setActiveActivityBarItem, installedExtensions, installedExtensionMetadata } = useFileStore();
+  const { toggleSidebar, sidebarVisible, activeActivityBarItem, setActiveActivityBarItem, installedExtensions, installedExtensionMetadata } = useFileStore(
+    useShallow((state) => ({
+      toggleSidebar: state.toggleSidebar,
+      sidebarVisible: state.sidebarVisible,
+      activeActivityBarItem: state.activeActivityBarItem,
+      setActiveActivityBarItem: state.setActiveActivityBarItem,
+      installedExtensions: state.installedExtensions,
+      installedExtensionMetadata: state.installedExtensionMetadata,
+    }))
+  );
   const codexInstalled = isCodexInstalled(installedExtensions);
   const codexMetadata = getCodexExtensionMetadata(installedExtensionMetadata);
 
@@ -33,11 +43,11 @@ export const Layout: React.FC = () => {
 
       <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Activity Bar */}
-        <div className="w-12 bg-vscode-activityBar flex flex-col items-center py-2 gap-1 shrink-0 z-50 border-r border-vscode-border pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pt-[env(safe-area-inset-top)]">
+        <div className="layout-pane w-12 bg-vscode-activityBar flex flex-col items-center py-2 gap-1 shrink-0 z-50 border-r border-vscode-border pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pt-[env(safe-area-inset-top)]">
           <button
             onClick={() => handleActivityClick('explorer')}
             className={clsx(
-              "text-gray-400 hover:text-white p-2.5 relative rounded transition-all duration-150",
+              "text-gray-400 hover:text-white p-2.5 relative rounded transition-colors duration-150",
               activeActivityBarItem === 'explorer' && sidebarVisible && "text-white bg-white/5"
             )}
           >
@@ -49,7 +59,7 @@ export const Layout: React.FC = () => {
           <button
             onClick={() => handleActivityClick('search')}
             className={clsx(
-              "text-gray-400 hover:text-white p-2.5 relative rounded transition-all duration-150",
+              "text-gray-400 hover:text-white p-2.5 relative rounded transition-colors duration-150",
               activeActivityBarItem === 'search' && sidebarVisible && "text-white bg-white/5"
             )}
           >
@@ -61,7 +71,7 @@ export const Layout: React.FC = () => {
           <button
             onClick={() => handleActivityClick('git')}
             className={clsx(
-              "text-gray-400 hover:text-white p-2.5 relative rounded transition-all duration-150",
+              "text-gray-400 hover:text-white p-2.5 relative rounded transition-colors duration-150",
               activeActivityBarItem === 'git' && sidebarVisible && "text-white bg-white/5"
             )}
           >
@@ -73,7 +83,7 @@ export const Layout: React.FC = () => {
           <button
             onClick={() => handleActivityClick('extensions')}
             className={clsx(
-              "text-gray-400 hover:text-white p-2.5 relative rounded transition-all duration-150",
+              "text-gray-400 hover:text-white p-2.5 relative rounded transition-colors duration-150",
               activeActivityBarItem === 'extensions' && sidebarVisible && "text-white bg-white/5"
             )}
           >
@@ -86,7 +96,7 @@ export const Layout: React.FC = () => {
             <button
               onClick={() => handleActivityClick('codex')}
               className={clsx(
-                "text-gray-400 hover:text-white p-2.5 relative rounded transition-all duration-150",
+                "text-gray-400 hover:text-white p-2.5 relative rounded transition-colors duration-150",
                 activeActivityBarItem === 'codex' && sidebarVisible && "text-white bg-white/5"
               )}
             >
@@ -100,7 +110,7 @@ export const Layout: React.FC = () => {
           <button
             onClick={() => handleActivityClick('settings')}
             className={clsx(
-              "text-gray-400 hover:text-white p-2.5 relative rounded transition-all duration-150",
+              "text-gray-400 hover:text-white p-2.5 relative rounded transition-colors duration-150",
               activeActivityBarItem === 'settings' && sidebarVisible && "text-white bg-white/5"
             )}
           >
@@ -114,7 +124,7 @@ export const Layout: React.FC = () => {
           <Sidebar />
 
           {/* Editor Area */}
-          <div className="flex-1 flex flex-col min-w-0 bg-vscode-bg">
+          <div className="layout-pane flex-1 flex flex-col min-w-0 bg-vscode-bg">
             <Tabs />
             <CodeEditor />
             <Terminal />

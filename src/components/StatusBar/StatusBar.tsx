@@ -4,14 +4,22 @@ import { GitBranch, Bell, AlertTriangle } from 'lucide-react';
 import { useFileStore } from '../../store/useFileStore';
 import { getCodexExtensionMetadata, isCodexInstalled } from '../../utils/codex';
 import { CodexIcon } from '../Codex/CodexIcon';
+import { useShallow } from 'zustand/shallow';
 
 export const StatusBar: React.FC = () => {
-  const { installedExtensions, installedExtensionMetadata, toggleCodexDrawer, codexDrawerOpen } = useFileStore();
+  const { installedExtensions, installedExtensionMetadata, toggleCodexDrawer, codexDrawerOpen } = useFileStore(
+    useShallow((state) => ({
+      installedExtensions: state.installedExtensions,
+      installedExtensionMetadata: state.installedExtensionMetadata,
+      toggleCodexDrawer: state.toggleCodexDrawer,
+      codexDrawerOpen: state.codexDrawerOpen,
+    }))
+  );
   const codexInstalled = isCodexInstalled(installedExtensions);
   const codexMetadata = getCodexExtensionMetadata(installedExtensionMetadata);
 
   return (
-    <div className="h-6 bg-vscode-statusBar text-white flex items-center justify-between px-3 text-xs select-none shrink-0 z-40">
+    <div className="layout-pane h-6 bg-vscode-statusBar text-white flex items-center justify-between px-3 text-xs select-none shrink-0 z-40">
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-1 hover:bg-white/20 px-1.5 py-0.5 rounded cursor-pointer transition-colors duration-150">
           <GitBranch size={12} />

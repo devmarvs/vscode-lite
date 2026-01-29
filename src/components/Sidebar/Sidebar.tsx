@@ -7,9 +7,19 @@ import { Extensions } from './Extensions';
 import { Settings } from './Settings';
 import { CodexPanel } from '../Codex/CodexPanel';
 import clsx from 'clsx';
+import { useShallow } from 'zustand/shallow';
 
 const Explorer: React.FC = () => {
-  const { files, activeFileId, setActiveFile, deleteFile, addFile, setSidebarVisible } = useFileStore();
+  const { files, activeFileId, setActiveFile, deleteFile, addFile, setSidebarVisible } = useFileStore(
+    useShallow((state) => ({
+      files: state.files,
+      activeFileId: state.activeFileId,
+      setActiveFile: state.setActiveFile,
+      deleteFile: state.deleteFile,
+      addFile: state.addFile,
+      setSidebarVisible: state.setSidebarVisible,
+    }))
+  );
   const [newFileName, setNewFileName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
 
@@ -90,13 +100,18 @@ const Explorer: React.FC = () => {
 };
 
 export const Sidebar: React.FC = () => {
-  const { sidebarVisible, activeActivityBarItem } = useFileStore();
+  const { sidebarVisible, activeActivityBarItem } = useFileStore(
+    useShallow((state) => ({
+      sidebarVisible: state.sidebarVisible,
+      activeActivityBarItem: state.activeActivityBarItem,
+    }))
+  );
 
   if (!sidebarVisible) return null;
 
   return (
     <div
-      className="w-full md:w-64 h-full border-r border-vscode-border flex flex-col shrink-0 absolute top-0 left-0 md:relative z-50 shadow-2xl md:shadow-none pt-[env(safe-area-inset-top)]"
+      className="layout-pane w-full md:w-64 h-full border-r border-vscode-border flex flex-col shrink-0 absolute top-0 left-0 md:relative z-50 shadow-2xl md:shadow-none pt-[env(safe-area-inset-top)]"
       style={{ backgroundColor: '#252526' }}
     >
       {activeActivityBarItem === 'explorer' && <Explorer />}

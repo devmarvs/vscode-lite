@@ -1,9 +1,16 @@
 import React, { useState } from 'react';
 import { useFileStore } from '../../store/useFileStore';
 import { ArrowRight, CaseSensitive, Regex, WholeWord, X } from 'lucide-react';
+import { useShallow } from 'zustand/shallow';
 
 export const Search: React.FC = () => {
-  const { files, setActiveFile, setSidebarVisible } = useFileStore();
+  const { files, setActiveFile, setSidebarVisible } = useFileStore(
+    useShallow((state) => ({
+      files: state.files,
+      setActiveFile: state.setActiveFile,
+      setSidebarVisible: state.setSidebarVisible,
+    }))
+  );
   const [query, setQuery] = useState('');
 
   const results = query 

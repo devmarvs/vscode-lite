@@ -2,11 +2,22 @@ import React, { useState, useEffect } from 'react';
 import { useFileStore } from '../../store/useFileStore';
 import { Search } from 'lucide-react';
 import { isCodexInstalled } from '../../utils/codex';
+import { useShallow } from 'zustand/shallow';
 
 export const CommandPalette: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const { files, setActiveFile, addFile, toggleTerminal, toggleSidebar, openCodexModal, installedExtensions } = useFileStore();
+  const { files, setActiveFile, addFile, toggleTerminal, toggleSidebar, openCodexModal, installedExtensions } = useFileStore(
+    useShallow((state) => ({
+      files: state.files,
+      setActiveFile: state.setActiveFile,
+      addFile: state.addFile,
+      toggleTerminal: state.toggleTerminal,
+      toggleSidebar: state.toggleSidebar,
+      openCodexModal: state.openCodexModal,
+      installedExtensions: state.installedExtensions,
+    }))
+  );
   const codexInstalled = isCodexInstalled(installedExtensions);
 
   useEffect(() => {
@@ -40,7 +51,7 @@ export const CommandPalette: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh] bg-black/50" onClick={() => setOpen(false)}>
-      <div className="w-[600px] max-w-[90%] bg-[#252526] shadow-2xl rounded-md overflow-hidden border border-[#454545]" onClick={e => e.stopPropagation()}>
+      <div className="layout-pane w-[600px] max-w-[90%] bg-[#252526] shadow-2xl rounded-md overflow-hidden border border-[#454545]" onClick={e => e.stopPropagation()}>
         <div className="flex items-center px-4 border-b border-[#454545]">
           <Search size={16} className="text-gray-400 mr-2" />
           <input

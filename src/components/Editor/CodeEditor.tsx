@@ -2,9 +2,17 @@ import React, { useEffect, useRef } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type { editor as MonacoEditor } from 'monaco-editor';
 import { useFileStore } from '../../store/useFileStore';
+import { useShallow } from 'zustand/shallow';
 
 export const CodeEditor: React.FC = () => {
-  const { files, activeFileId, updateFileContent, editorSettings } = useFileStore();
+  const { files, activeFileId, updateFileContent, editorSettings } = useFileStore(
+    useShallow((state) => ({
+      files: state.files,
+      activeFileId: state.activeFileId,
+      updateFileContent: state.updateFileContent,
+      editorSettings: state.editorSettings,
+    }))
+  );
   const activeFile = files.find(f => f.id === activeFileId);
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
 

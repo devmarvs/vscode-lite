@@ -4,6 +4,7 @@ import { Send, Sparkles, LogOut } from 'lucide-react';
 import { useFileStore, type CodexMessage } from '../../store/useFileStore';
 import { buildOpenAIHeaders, getOpenAIBaseUrl } from '../../utils/codex';
 import { CodexAuthPanel } from './CodexAuthPanel';
+import { useShallow } from 'zustand/shallow';
 
 type CodexConversationProps = {
   autoFocus?: boolean;
@@ -56,7 +57,16 @@ const buildRequestError = (response: Response, data: unknown, rawText: string) =
 };
 
 export const CodexConversation: React.FC<CodexConversationProps> = ({ autoFocus = false, compact = false }) => {
-  const { codexMessages, addCodexMessage, codexApiKey, clearCodexApiKey, codexSettings, setCodexModel } = useFileStore();
+  const { codexMessages, addCodexMessage, codexApiKey, clearCodexApiKey, codexSettings, setCodexModel } = useFileStore(
+    useShallow((state) => ({
+      codexMessages: state.codexMessages,
+      addCodexMessage: state.addCodexMessage,
+      codexApiKey: state.codexApiKey,
+      clearCodexApiKey: state.clearCodexApiKey,
+      codexSettings: state.codexSettings,
+      setCodexModel: state.setCodexModel,
+    }))
+  );
   const [draft, setDraft] = useState('');
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);

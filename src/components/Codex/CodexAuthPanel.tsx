@@ -2,13 +2,18 @@ import React, { useState } from 'react';
 import clsx from 'clsx';
 import { KeyRound, Eye, EyeOff } from 'lucide-react';
 import { useFileStore } from '../../store/useFileStore';
+import { useShallow } from 'zustand/shallow';
 
 type CodexAuthPanelProps = {
   compact?: boolean;
 };
 
 export const CodexAuthPanel: React.FC<CodexAuthPanelProps> = ({ compact = false }) => {
-  const { setCodexApiKey } = useFileStore();
+  const { setCodexApiKey } = useFileStore(
+    useShallow((state) => ({
+      setCodexApiKey: state.setCodexApiKey,
+    }))
+  );
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
   const [showKey, setShowKey] = useState(false);
