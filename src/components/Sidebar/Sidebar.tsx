@@ -100,10 +100,11 @@ const Explorer: React.FC = () => {
 };
 
 export const Sidebar: React.FC = () => {
-  const { sidebarVisible, activeActivityBarItem } = useFileStore(
+  const { sidebarVisible, activeActivityBarItem, sidebarWidth } = useFileStore(
     useShallow((state) => ({
       sidebarVisible: state.sidebarVisible,
       activeActivityBarItem: state.activeActivityBarItem,
+      sidebarWidth: state.sidebarWidth,
     }))
   );
 
@@ -111,8 +112,8 @@ export const Sidebar: React.FC = () => {
 
   return (
     <div
-      className="layout-pane w-full md:w-64 h-full border-r border-vscode-border flex flex-col shrink-0 absolute top-0 left-0 md:relative z-50 shadow-2xl md:shadow-none pt-[env(safe-area-inset-top)]"
-      style={{ backgroundColor: '#252526' }}
+      className="layout-pane sidebar-resizable h-full border-r border-vscode-border flex flex-col shrink-0 absolute top-0 left-0 md:relative z-50 shadow-2xl md:shadow-none pt-[env(safe-area-inset-top)]"
+      style={{ backgroundColor: '#252526', ['--sidebar-width' as string]: `${sidebarWidth}px` }}
     >
       {activeActivityBarItem === 'explorer' && <Explorer />}
       {activeActivityBarItem === 'search' && <Search />}

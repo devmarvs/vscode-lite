@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Sidebar } from '../Sidebar/Sidebar';
 import { CodeEditor } from '../Editor/CodeEditor';
 import { CommandPalette } from '../CommandPalette/CommandPalette';
@@ -15,7 +15,7 @@ import { CodexIcon } from '../Codex/CodexIcon';
 import { useShallow } from 'zustand/shallow';
 
 export const Layout: React.FC = () => {
-  const { toggleSidebar, sidebarVisible, activeActivityBarItem, setActiveActivityBarItem, installedExtensions, installedExtensionMetadata } = useFileStore(
+  const { toggleSidebar, sidebarVisible, activeActivityBarItem, setActiveActivityBarItem, installedExtensions, installedExtensionMetadata, sidebarWidth, setSidebarWidth, terminalOpen, terminalHeight, setTerminalHeight } = useFileStore(
     useShallow((state) => ({
       toggleSidebar: state.toggleSidebar,
       sidebarVisible: state.sidebarVisible,
@@ -23,10 +23,79 @@ export const Layout: React.FC = () => {
       setActiveActivityBarItem: state.setActiveActivityBarItem,
       installedExtensions: state.installedExtensions,
       installedExtensionMetadata: state.installedExtensionMetadata,
+      sidebarWidth: state.sidebarWidth,
+      setSidebarWidth: state.setSidebarWidth,
+      terminalOpen: state.terminalOpen,
+      terminalHeight: state.terminalHeight,
+      setTerminalHeight: state.setTerminalHeight,
     }))
   );
   const codexInstalled = isCodexInstalled(installedExtensions);
   const codexMetadata = getCodexExtensionMetadata(installedExtensionMetadata);
+  const dragRef = useRef<{
+    type: 'sidebar' | 'terminal';
+    startX?: number;
+    startY?: number;
+    startSize: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag) {
+        return;
+      }
+
+      if (drag.type === 'sidebar' && typeof drag.startX === 'number') {
+        const delta = event.clientX - drag.startX;
+        const maxWidth = Math.max(240, Math.floor(window.innerWidth * 0.6));
+        setSidebarWidth(Math.min(maxWidth, drag.startSize + delta));
+      }
+
+      if (drag.type === 'terminal' && typeof drag.startY === 'number') {
+        const delta = drag.startY - event.clientY;
+        const maxHeight = Math.max(200, Math.floor(window.innerHeight * 0.6));
+        setTerminalHeight(Math.min(maxHeight, drag.startSize + delta));
+      }
+    };
+
+    const handlePointerUp = () => {
+      if (!dragRef.current) {
+        return;
+      }
+      dragRef.current = null;
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [setSidebarWidth, setTerminalHeight]);
+
+  const beginSidebarResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    dragRef.current = { type: 'sidebar', startX: event.clientX, startSize: sidebarWidth };
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+  };
+
+  const beginTerminalResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    dragRef.current = { type: 'terminal', startY: event.clientY, startSize: terminalHeight };
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'row-resize';
+  };
 
   const handleActivityClick = (item: ActivityBarItem) => {
     if (activeActivityBarItem === item && sidebarVisible) {
@@ -122,11 +191,33 @@ export const Layout: React.FC = () => {
         <div className="flex flex-1 relative overflow-hidden">
           {/* Sidebar */}
           <Sidebar />
+          {sidebarVisible && (
+            <div
+              className="hidden md:block w-1 cursor-col-resize hover:bg-white/10"
+              onPointerDown={beginSidebarResize}
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize sidebar"
+              style={{ touchAction: 'none' }}
+            />
+          )}
 
           {/* Editor Area */}
           <div className="layout-pane flex-1 flex flex-col min-w-0 bg-vscode-bg">
             <Tabs />
-            <CodeEditor />
+            <div className="flex-1 min-h-0">
+              <CodeEditor />
+            </div>
+            {terminalOpen && (
+              <div
+                className="h-1 cursor-row-resize hover:bg-white/10"
+                onPointerDown={beginTerminalResize}
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="Resize terminal"
+                style={{ touchAction: 'none' }}
+              />
+            )}
             <Terminal />
           </div>
 

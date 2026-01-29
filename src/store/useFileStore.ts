@@ -35,6 +35,8 @@ const EXTENSIONS_STORAGE_KEY = 'installed_extensions';
 const EXTENSION_METADATA_STORAGE_KEY = 'installed_extension_metadata';
 const CODEX_SETTINGS_STORAGE_KEY = 'lite_vscode_codex_settings';
 const CODEX_API_KEY_SESSION_KEY = 'lite_vscode_codex_api_key';
+const SIDEBAR_WIDTH_STORAGE_KEY = 'lite_vscode_sidebar_width';
+const TERMINAL_HEIGHT_STORAGE_KEY = 'lite_vscode_terminal_height';
 
 const normalizeEditorSettings = (settings: Partial<EditorSettings>): EditorSettings => {
   const fontSizeRaw = typeof settings.fontSize === 'number' ? settings.fontSize : DEFAULT_EDITOR_SETTINGS.fontSize;
@@ -52,6 +54,9 @@ const normalizeEditorSettings = (settings: Partial<EditorSettings>): EditorSetti
       : DEFAULT_EDITOR_SETTINGS.renderWhitespace,
   };
 };
+
+const clampSidebarWidth = (value: number) => Math.min(520, Math.max(200, value));
+const clampTerminalHeight = (value: number) => Math.min(480, Math.max(120, value));
 
 const loadEditorSettings = (): EditorSettings => {
   if (typeof window === 'undefined') {
@@ -154,6 +159,64 @@ const persistCodexApiKey = (key: string | null) => {
   }
 };
 
+const loadSidebarWidth = (): number => {
+  if (typeof window === 'undefined') {
+    return 260;
+  }
+
+  try {
+    const stored = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+    const parsed = stored ? Number(stored) : NaN;
+    if (!Number.isFinite(parsed)) {
+      return 260;
+    }
+    return clampSidebarWidth(parsed);
+  } catch {
+    return 260;
+  }
+};
+
+const persistSidebarWidth = (width: number) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(width));
+  } catch {
+    // Ignore storage failures.
+  }
+};
+
+const loadTerminalHeight = (): number => {
+  if (typeof window === 'undefined') {
+    return 192;
+  }
+
+  try {
+    const stored = window.localStorage.getItem(TERMINAL_HEIGHT_STORAGE_KEY);
+    const parsed = stored ? Number(stored) : NaN;
+    if (!Number.isFinite(parsed)) {
+      return 192;
+    }
+    return clampTerminalHeight(parsed);
+  } catch {
+    return 192;
+  }
+};
+
+const persistTerminalHeight = (height: number) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(TERMINAL_HEIGHT_STORAGE_KEY, String(height));
+  } catch {
+    // Ignore storage failures.
+  }
+};
+
 export interface InstalledExtensionMetadata {
   id: string;
   name?: string;
@@ -228,6 +291,8 @@ interface FileStore {
   codexDrawerOpen: boolean;
   codexModalOpen: boolean;
   codexMessages: CodexMessage[];
+  sidebarWidth: number;
+  terminalHeight: number;
   
   // Actions
   addFile: (name: string, language: string) => void;
@@ -251,6 +316,8 @@ interface FileStore {
   closeCodexModal: () => void;
   addCodexMessage: (message: CodexMessage) => void;
   clearCodexMessages: () => void;
+  setSidebarWidth: (width: number) => void;
+  setTerminalHeight: (height: number) => void;
 }
 
 const initialFiles: File[] = [
@@ -296,6 +363,8 @@ export const useFileStore = create<FileStore>((set) => ({
   codexDrawerOpen: false,
   codexModalOpen: false,
   codexMessages: [],
+  sidebarWidth: loadSidebarWidth(),
+  terminalHeight: loadTerminalHeight(),
 
   addFile: (name, language) => set((state) => {
     const newFile: File = {
@@ -398,4 +467,16 @@ export const useFileStore = create<FileStore>((set) => ({
   addCodexMessage: (message) => set((state) => ({ codexMessages: [...state.codexMessages, message] })),
 
   clearCodexMessages: () => set({ codexMessages: [] }),
+
+  setSidebarWidth: (width) => set(() => {
+    const next = clampSidebarWidth(width);
+    persistSidebarWidth(next);
+    return { sidebarWidth: next };
+  }),
+
+  setTerminalHeight: (height) => set(() => {
+    const next = clampTerminalHeight(height);
+    persistTerminalHeight(next);
+    return { terminalHeight: next };
+  }),
 }));

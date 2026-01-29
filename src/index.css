@@ -32,6 +32,16 @@ body {
   contain: layout paint;
 }
 
+.sidebar-resizable {
+  width: 100%;
+}
+
+@media (min-width: 768px) {
+  .sidebar-resizable {
+    width: var(--sidebar-width, 260px);
+  }
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 10px;
