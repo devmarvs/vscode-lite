@@ -10,6 +10,51 @@ type CodexConversationProps = {
   compact?: boolean;
 };
 
+type ResponseInputItem = {
+  type: 'message';
+  role: 'user' | 'assistant';
+  content: Array<{ type: 'input_text' | 'output_text'; text: string }>;
+};
+
+const buildInputItems = (messages: CodexMessage[]): ResponseInputItem[] =>
+  messages.map((message) => ({
+    type: 'message',
+    role: message.role,
+    content: [
+      {
+        type: message.role === 'assistant' ? 'output_text' : 'input_text',
+        text: message.content,
+      },
+    ],
+  }));
+
+const readResponseBody = async (response: Response) => {
+  const text = await response.text();
+  if (!text) {
+    return { data: null as unknown, text: '' };
+  }
+
+  try {
+    return { data: JSON.parse(text) as unknown, text };
+  } catch {
+    return { data: null as unknown, text };
+  }
+};
+
+const buildRequestError = (response: Response, data: unknown, rawText: string) => {
+  const message = (data as { error?: { message?: string } } | null)?.error?.message;
+
+  if (response.status === 401 || response.status === 403) {
+    return message || 'Invalid API key or insufficient permissions.';
+  }
+
+  if (response.status === 429) {
+    return message || 'Rate limit reached. Please try again in a moment.';
+  }
+
+  return message || rawText || `Request failed with status ${response.status}.`;
+};
+
 export const CodexConversation: React.FC<CodexConversationProps> = ({ autoFocus = false, compact = false }) => {
   const { codexMessages, addCodexMessage, codexApiKey, clearCodexApiKey, codexSettings, setCodexModel } = useFileStore();
   const [draft, setDraft] = useState('');
@@ -25,6 +70,10 @@ export const CodexConversation: React.FC<CodexConversationProps> = ({ autoFocus 
   const submitMessage = async (content: string) => {
     const text = content.trim();
     if (!text) {
+      return;
+    }
+
+    if (waiting) {
       return;
     }
 
@@ -46,28 +95,32 @@ export const CodexConversation: React.FC<CodexConversationProps> = ({ autoFocus 
     setError(null);
 
     try {
+      const inputItems = buildInputItems([...codexMessages, userMessage]);
       const response = await fetch(`${getOpenAIBaseUrl()}/responses`, {
         method: 'POST',
         headers: buildOpenAIHeaders(codexApiKey),
         body: JSON.stringify({
           model: codexSettings.model,
-          input: [...codexMessages, userMessage].map((message) => ({
-            role: message.role,
-            content: message.content,
-          })),
+          input: inputItems,
           temperature: 0.2,
           store: false,
         }),
       });
 
-      const data = await response.json().catch(() => null);
+      const { data, text: rawText } = await readResponseBody(response);
 
       if (!response.ok) {
-        const message = data?.error?.message || `Request failed with status ${response.status}.`;
-        throw new Error(message);
+        throw new Error(buildRequestError(response, data, rawText));
       }
 
-      const outputItems = Array.isArray(data?.output) ? data.output : [];
+      if (!data || typeof data !== 'object') {
+        throw new Error('OpenAI returned an unreadable response.');
+      }
+
+      const outputItems = Array.isArray((data as { output?: unknown }).output)
+        ? (data as { output: unknown[] }).output
+        : [];
+      const outputText = (data as { output_text?: string }).output_text;
       const assistantText = outputItems
         .flatMap((item: { type?: string; role?: string; content?: Array<{ type?: string; text?: string }> }) => {
           if (item?.type !== 'message' || item?.role !== 'assistant' || !Array.isArray(item.content)) {
@@ -78,7 +131,7 @@ export const CodexConversation: React.FC<CodexConversationProps> = ({ autoFocus 
             .map((content) => content.text as string);
         })
         .join('')
-        .trim() || data?.output_text || '';
+        .trim() || outputText || '';
 
       if (!assistantText) {
         throw new Error('OpenAI returned an empty response.');
@@ -94,13 +147,11 @@ export const CodexConversation: React.FC<CodexConversationProps> = ({ autoFocus 
       addCodexMessage(reply);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to reach the OpenAI API.';
-      setError(message);
-      addCodexMessage({
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: `Request failed: ${message}`,
-        timestamp: Date.now(),
-      });
+      const hint =
+        err instanceof TypeError && message.toLowerCase().includes('fetch')
+          ? 'Browser requests can be blocked by CORS. Set VITE_OPENAI_BASE_URL to a server-side proxy.'
+          : null;
+      setError(hint ? `${message} ${hint}` : message);
     } finally {
       setWaiting(false);
     }
@@ -193,7 +244,12 @@ export const CodexConversation: React.FC<CodexConversationProps> = ({ autoFocus 
           <input
             type="text"
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              if (error) {
+                setError(null);
+              }
+            }}
             onKeyDown={handleKeyDown}
             autoFocus={autoFocus}
             placeholder={signedIn ? "Ask Codex..." : "Sign in to chat with Codex"}
