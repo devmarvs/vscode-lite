@@ -1,9 +1,14 @@
 import React from 'react';
 import { GitCommit, RefreshCw, Check, Plus, MoreHorizontal, X } from 'lucide-react';
 import { useFileStore } from '../../store/useFileStore';
+import { useShallow } from 'zustand/shallow';
 
 export const SourceControl: React.FC = () => {
-  const { setSidebarVisible } = useFileStore();
+  const { setSidebarVisible } = useFileStore(
+    useShallow((state) => ({
+      setSidebarVisible: state.setSidebarVisible,
+    }))
+  );
   return (
     <div className="flex flex-col h-full text-vscode-text">
       <div className="px-4 py-2 flex items-center justify-between">

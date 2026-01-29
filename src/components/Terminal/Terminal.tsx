@@ -1,14 +1,20 @@
 import React from 'react';
 import { useFileStore } from '../../store/useFileStore';
 import { X } from 'lucide-react';
+import { useShallow } from 'zustand/shallow';
 
 export const Terminal: React.FC = () => {
-  const { terminalOpen, toggleTerminal } = useFileStore();
+  const { terminalOpen, toggleTerminal } = useFileStore(
+    useShallow((state) => ({
+      terminalOpen: state.terminalOpen,
+      toggleTerminal: state.toggleTerminal,
+    }))
+  );
 
   if (!terminalOpen) return null;
 
   return (
-    <div className="h-48 bg-vscode-bg border-t border-vscode-border flex flex-col shrink-0">
+    <div className="layout-pane h-48 bg-vscode-bg border-t border-vscode-border flex flex-col shrink-0">
       <div className="flex items-center justify-between px-4 py-1 bg-[#252526] text-xs text-vscode-text uppercase tracking-wider border-b border-vscode-border">
         <div className="flex gap-4">
            <span className="border-b border-white text-white cursor-pointer">Terminal</span>

@@ -2,6 +2,7 @@ import React from 'react';
 import clsx from 'clsx';
 import { RotateCcw, X } from 'lucide-react';
 import { useFileStore, DEFAULT_EDITOR_SETTINGS, type EditorSettings } from '../../store/useFileStore';
+import { useShallow } from 'zustand/shallow';
 
 type ToggleRowProps = {
   label: string;
@@ -103,7 +104,14 @@ const SelectRow: React.FC<SelectRowProps> = ({ label, description, value, option
 );
 
 export const Settings: React.FC = () => {
-  const { editorSettings, updateEditorSettings, resetEditorSettings, setSidebarVisible } = useFileStore();
+  const { editorSettings, updateEditorSettings, resetEditorSettings, setSidebarVisible } = useFileStore(
+    useShallow((state) => ({
+      editorSettings: state.editorSettings,
+      updateEditorSettings: state.updateEditorSettings,
+      resetEditorSettings: state.resetEditorSettings,
+      setSidebarVisible: state.setSidebarVisible,
+    }))
+  );
   const settingsKeys = Object.keys(DEFAULT_EDITOR_SETTINGS) as (keyof EditorSettings)[];
   const isDefault = settingsKeys.every((key) => editorSettings[key] === DEFAULT_EDITOR_SETTINGS[key]);
 

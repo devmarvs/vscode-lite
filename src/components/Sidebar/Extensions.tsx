@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Download, Loader2 } from 'lucide-react';
 import { useFileStore } from '../../store/useFileStore';
 import { isCodexExtensionId } from '../../utils/codex';
+import { useShallow } from 'zustand/shallow';
 
 interface Extension {
   name: string;
@@ -20,7 +21,15 @@ export const Extensions: React.FC = () => {
   const [extensions, setExtensions] = useState<Extension[]>([]);
   const [loading, setLoading] = useState(false);
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const { installedExtensions, installedExtensionMetadata, installExtension, uninstallExtension, setActiveActivityBarItem } = useFileStore();
+  const { installedExtensions, installedExtensionMetadata, installExtension, uninstallExtension, setActiveActivityBarItem } = useFileStore(
+    useShallow((state) => ({
+      installedExtensions: state.installedExtensions,
+      installedExtensionMetadata: state.installedExtensionMetadata,
+      installExtension: state.installExtension,
+      uninstallExtension: state.uninstallExtension,
+      setActiveActivityBarItem: state.setActiveActivityBarItem,
+    }))
+  );
 
   // Track installation state
   const [installing, setInstalling] = useState<Record<string, boolean>>({});

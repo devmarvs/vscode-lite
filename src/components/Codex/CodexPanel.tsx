@@ -2,9 +2,14 @@ import React from 'react';
 import { X } from 'lucide-react';
 import { useFileStore } from '../../store/useFileStore';
 import { CodexConversation } from './CodexConversation';
+import { useShallow } from 'zustand/shallow';
 
 export const CodexPanel: React.FC = () => {
-  const { setSidebarVisible } = useFileStore();
+  const { setSidebarVisible } = useFileStore(
+    useShallow((state) => ({
+      setSidebarVisible: state.setSidebarVisible,
+    }))
+  );
 
   return (
     <div className="flex flex-col h-full text-vscode-text">
