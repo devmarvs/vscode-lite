@@ -144,8 +144,8 @@ export const Extensions: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full text-vscode-text">
-      <div className="px-4 py-2 text-xs font-bold uppercase tracking-wider bg-vscode-sidebar border-b border-vscode-border flex justify-between items-center">
-        <span>Extensions</span>
+      <div className="panel-header">
+        <span className="panel-title">Extensions</span>
       </div>
       <div className="px-4 py-2">
         <input

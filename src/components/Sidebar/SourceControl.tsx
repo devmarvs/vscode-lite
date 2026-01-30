@@ -11,9 +11,9 @@ export const SourceControl: React.FC = () => {
   );
   return (
     <div className="flex flex-col h-full text-vscode-text">
-      <div className="px-4 py-2 flex items-center justify-between">
-        <span className="text-xs font-bold uppercase tracking-wider">Source Control</span>
-        <div className="flex gap-2 items-center">
+      <div className="panel-header">
+        <span className="panel-title">Source Control</span>
+        <div className="panel-actions">
            <button onClick={() => setSidebarVisible(false)} className="md:hidden hover:text-white transition-colors duration-150 p-1 hover:bg-white/10 rounded mr-2">
              <X size={16} />
            </button>

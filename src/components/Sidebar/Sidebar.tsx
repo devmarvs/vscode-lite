@@ -42,9 +42,9 @@ const Explorer: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="h-10 flex items-center justify-between px-4 bg-vscode-sidebar text-xs font-bold tracking-wider text-vscode-text uppercase border-b border-vscode-border/50">
-        <span>Explorer</span>
-        <div className="flex gap-2">
+      <div className="panel-header">
+        <span className="panel-title">Explorer</span>
+        <div className="panel-actions">
           <button onClick={() => setIsCreating(true)} className="hover:text-white transition-colors duration-150 p-1 hover:bg-white/10 rounded">
             <FilePlus size={16} />
           </button>

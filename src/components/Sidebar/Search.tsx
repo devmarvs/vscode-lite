@@ -19,8 +19,8 @@ export const Search: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full text-vscode-text">
-      <div className="px-4 py-2 text-xs font-bold uppercase tracking-wider flex justify-between items-center">
-        <span>Search</span>
+      <div className="panel-header">
+        <span className="panel-title">Search</span>
         <button onClick={() => setSidebarVisible(false)} className="md:hidden hover:text-white transition-colors duration-150 p-1 hover:bg-white/10 rounded">
           <X size={16} />
         </button>

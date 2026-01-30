@@ -121,9 +121,9 @@ export const Settings: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full text-vscode-text">
-      <div className="px-4 py-2 text-xs font-bold uppercase tracking-wider bg-vscode-sidebar border-b border-vscode-border flex justify-between items-center">
-        <span>Settings</span>
-        <div className="flex items-center gap-2">
+      <div className="panel-header">
+        <span className="panel-title">Settings</span>
+        <div className="panel-actions">
           <button
             type="button"
             onClick={resetEditorSettings}
