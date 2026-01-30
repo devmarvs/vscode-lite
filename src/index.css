@@ -32,6 +32,43 @@ body {
   contain: layout paint;
 }
 
+.sidebar-resizable {
+  width: 100%;
+}
+
+@media (min-width: 768px) {
+  .sidebar-resizable {
+    width: var(--sidebar-width, 260px);
+  }
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: #252526;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #cfcfcf;
+}
+
+.panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.panel-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 10px;

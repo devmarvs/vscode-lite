@@ -21,8 +21,8 @@ export const CodexDrawer: React.FC = () => {
         onClick={toggleCodexDrawer}
       />
       <div className="layout-pane absolute right-0 top-0 h-full w-full md:w-[360px] bg-[#1f1f1f] border-l border-vscode-border z-50 shadow-2xl flex flex-col">
-        <div className="px-4 py-2 text-xs font-bold uppercase tracking-wider bg-vscode-sidebar border-b border-vscode-border flex items-center justify-between">
-          <span>Codex Drawer</span>
+        <div className="panel-header">
+          <span className="panel-title">Codex Drawer</span>
           <button
             onClick={toggleCodexDrawer}
             className="hover:text-white transition-colors duration-150 p-1 hover:bg-white/10 rounded"

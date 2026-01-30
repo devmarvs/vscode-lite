@@ -4,25 +4,29 @@ import { X } from 'lucide-react';
 import { useShallow } from 'zustand/shallow';
 
 export const Terminal: React.FC = () => {
-  const { terminalOpen, toggleTerminal } = useFileStore(
+  const { terminalOpen, toggleTerminal, terminalHeight } = useFileStore(
     useShallow((state) => ({
       terminalOpen: state.terminalOpen,
       toggleTerminal: state.toggleTerminal,
+      terminalHeight: state.terminalHeight,
     }))
   );
 
   if (!terminalOpen) return null;
 
   return (
-    <div className="layout-pane h-48 bg-vscode-bg border-t border-vscode-border flex flex-col shrink-0">
-      <div className="flex items-center justify-between px-4 py-1 bg-[#252526] text-xs text-vscode-text uppercase tracking-wider border-b border-vscode-border">
-        <div className="flex gap-4">
+    <div
+      className="layout-pane bg-vscode-bg border-t border-vscode-border flex flex-col shrink-0"
+      style={{ height: terminalHeight }}
+    >
+      <div className="panel-header">
+        <div className="panel-title flex gap-4">
            <span className="border-b border-white text-white cursor-pointer">Terminal</span>
            <span className="cursor-pointer hover:text-white">Output</span>
            <span className="cursor-pointer hover:text-white">Problems</span>
            <span className="cursor-pointer hover:text-white">Debug Console</span>
         </div>
-        <div className="flex gap-2">
+        <div className="panel-actions">
            <button onClick={toggleTerminal} className="hover:text-white">
              <X size={14} />
            </button>

@@ -13,8 +13,8 @@ export const CodexPanel: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full text-vscode-text">
-      <div className="px-4 py-2 text-xs font-bold uppercase tracking-wider bg-vscode-sidebar border-b border-vscode-border flex justify-between items-center">
-        <span>Codex</span>
+      <div className="panel-header">
+        <span className="panel-title">Codex</span>
         <button
           onClick={() => setSidebarVisible(false)}
           className="md:hidden hover:text-white transition-colors duration-150 p-1 hover:bg-white/10 rounded"
