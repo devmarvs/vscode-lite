@@ -147,7 +147,7 @@ export const Settings: React.FC = () => {
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-6">
         <section className="space-y-3">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-gray-400">Editor</div>
+          <div className="panel-section-title">Editor</div>
           <ToggleRow
             label="Word Wrap"
             description="Wrap long lines to stay within the editor width."

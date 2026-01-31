@@ -36,7 +36,7 @@ export const SourceControl: React.FC = () => {
       </div>
       
       <div className="flex-1 overflow-y-auto mt-2">
-         <div className="px-4 py-1 text-xs font-bold text-blue-400 uppercase">Changes</div>
+         <div className="px-4 py-1 panel-section-title text-blue-400">Changes</div>
          <div className="px-4 py-1 text-sm hover:bg-vscode-hover cursor-pointer flex items-center group">
             <span className="text-yellow-500 mr-2">M</span>
             <span className="text-gray-300 group-hover:text-white">App.tsx</span>
