@@ -69,6 +69,14 @@ body {
   gap: 0.5rem;
 }
 
+.panel-section-title {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #9aa0a6;
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 10px;
