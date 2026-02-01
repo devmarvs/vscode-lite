@@ -13,6 +13,13 @@ export interface EditorSettings {
   renderWhitespace: EditorWhitespace;
 }
 
+export interface File {
+  id: string;
+  name: string;
+  content: string;
+  language: string;
+}
+
 export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   fontSize: 14,
   wordWrap: true,
@@ -37,6 +44,9 @@ const CODEX_SETTINGS_STORAGE_KEY = 'lite_vscode_codex_settings';
 const CODEX_API_KEY_SESSION_KEY = 'lite_vscode_codex_api_key';
 const SIDEBAR_WIDTH_STORAGE_KEY = 'lite_vscode_sidebar_width';
 const TERMINAL_HEIGHT_STORAGE_KEY = 'lite_vscode_terminal_height';
+const FILES_STORAGE_KEY = 'lite_vscode_files';
+const ACTIVE_FILE_STORAGE_KEY = 'lite_vscode_active_file';
+const TERMINAL_OPEN_STORAGE_KEY = 'lite_vscode_terminal_open';
 
 const normalizeEditorSettings = (settings: Partial<EditorSettings>): EditorSettings => {
   const fontSizeRaw = typeof settings.fontSize === 'number' ? settings.fontSize : DEFAULT_EDITOR_SETTINGS.fontSize;
@@ -57,6 +67,35 @@ const normalizeEditorSettings = (settings: Partial<EditorSettings>): EditorSetti
 
 const clampSidebarWidth = (value: number) => Math.min(520, Math.max(200, value));
 const clampTerminalHeight = (value: number) => Math.min(480, Math.max(120, value));
+
+const initialFiles: File[] = [
+  {
+    id: '1',
+    name: 'App.tsx',
+    language: 'typescript',
+    content: `import React from 'react';
+
+export default function App() {
+  return (
+    <div className="p-4">
+      <h1 className="text-2xl font-bold">Hello World</h1>
+    </div>
+  );
+}`
+  },
+  {
+    id: '2',
+    name: 'utils.ts',
+    language: 'typescript',
+    content: `export const add = (a: number, b: number) => a + b;`
+  },
+  {
+    id: '3',
+    name: 'styles.css',
+    language: 'css',
+    content: `body { background: #1e1e1e; color: #fff; }`
+  }
+];
 
 const loadEditorSettings = (): EditorSettings => {
   if (typeof window === 'undefined') {
@@ -217,6 +256,106 @@ const persistTerminalHeight = (height: number) => {
   }
 };
 
+const isValidFile = (file: unknown): file is File =>
+  !!file
+  && typeof (file as File).id === 'string'
+  && typeof (file as File).name === 'string'
+  && typeof (file as File).content === 'string'
+  && typeof (file as File).language === 'string';
+
+const loadFiles = (): File[] => {
+  if (typeof window === 'undefined') {
+    return [...initialFiles];
+  }
+
+  try {
+    const stored = window.localStorage.getItem(FILES_STORAGE_KEY);
+    if (!stored) {
+      return [...initialFiles];
+    }
+
+    const parsed = JSON.parse(stored);
+    if (!Array.isArray(parsed)) {
+      return [...initialFiles];
+    }
+
+    const next = parsed.filter(isValidFile);
+    return next.length > 0 ? next : [...initialFiles];
+  } catch {
+    return [...initialFiles];
+  }
+};
+
+const persistFiles = (files: File[]) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(FILES_STORAGE_KEY, JSON.stringify(files));
+  } catch {
+    // Ignore storage failures.
+  }
+};
+
+const loadActiveFileId = (files: File[]): string | null => {
+  if (typeof window === 'undefined') {
+    return files[0]?.id ?? null;
+  }
+
+  try {
+    const stored = window.localStorage.getItem(ACTIVE_FILE_STORAGE_KEY);
+    if (stored && files.some((file) => file.id === stored)) {
+      return stored;
+    }
+  } catch {
+    // Ignore storage failures.
+  }
+
+  return files[0]?.id ?? null;
+};
+
+const persistActiveFileId = (id: string | null) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    if (id) {
+      window.localStorage.setItem(ACTIVE_FILE_STORAGE_KEY, id);
+    } else {
+      window.localStorage.removeItem(ACTIVE_FILE_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore storage failures.
+  }
+};
+
+const loadTerminalOpen = (): boolean => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  try {
+    const stored = window.localStorage.getItem(TERMINAL_OPEN_STORAGE_KEY);
+    return stored === 'true';
+  } catch {
+    return false;
+  }
+};
+
+const persistTerminalOpen = (open: boolean) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(TERMINAL_OPEN_STORAGE_KEY, String(open));
+  } catch {
+    // Ignore storage failures.
+  }
+};
+
 export interface InstalledExtensionMetadata {
   id: string;
   name?: string;
@@ -262,13 +401,6 @@ const persistInstalledExtensionMetadata = (metadata: Record<string, InstalledExt
     // Ignore storage failures.
   }
 };
-
-export interface File {
-  id: string;
-  name: string;
-  content: string;
-  language: string;
-}
 
 export interface CodexMessage {
   id: string;
@@ -320,40 +452,14 @@ interface FileStore {
   setTerminalHeight: (height: number) => void;
 }
 
-const initialFiles: File[] = [
-  {
-    id: '1',
-    name: 'App.tsx',
-    language: 'typescript',
-    content: `import React from 'react';
-
-export default function App() {
-  return (
-    <div className="p-4">
-      <h1 className="text-2xl font-bold">Hello World</h1>
-    </div>
-  );
-}`
-  },
-  {
-    id: '2',
-    name: 'utils.ts',
-    language: 'typescript',
-    content: `export const add = (a: number, b: number) => a + b;`
-  },
-  {
-    id: '3',
-    name: 'styles.css',
-    language: 'css',
-    content: `body { background: #1e1e1e; color: #fff; }`
-  }
-];
+const initialFilesState = loadFiles();
+const initialActiveFileId = loadActiveFileId(initialFilesState);
 
 export const useFileStore = create<FileStore>((set) => ({
-  files: initialFiles,
-  activeFileId: '1',
+  files: initialFilesState,
+  activeFileId: initialActiveFileId,
   sidebarVisible: true,
-  terminalOpen: false,
+  terminalOpen: loadTerminalOpen(),
   activeActivityBarItem: 'explorer',
   editorSettings: loadEditorSettings(),
   installedExtensions: loadInstalledExtensions(),
@@ -373,25 +479,43 @@ export const useFileStore = create<FileStore>((set) => ({
       language,
       content: ''
     };
-    return { files: [...state.files, newFile], activeFileId: newFile.id };
+    const nextFiles = [...state.files, newFile];
+    persistFiles(nextFiles);
+    persistActiveFileId(newFile.id);
+    return { files: nextFiles, activeFileId: newFile.id };
   }),
 
-  deleteFile: (id) => set((state) => ({
-    files: state.files.filter(f => f.id !== id),
-    activeFileId: state.activeFileId === id ? null : state.activeFileId
-  })),
+  deleteFile: (id) => set((state) => {
+    const nextFiles = state.files.filter(f => f.id !== id);
+    const nextActive = state.activeFileId === id ? (nextFiles[0]?.id ?? null) : state.activeFileId;
+    persistFiles(nextFiles);
+    persistActiveFileId(nextActive);
+    return {
+      files: nextFiles,
+      activeFileId: nextActive
+    };
+  }),
 
-  updateFileContent: (id, content) => set((state) => ({
-    files: state.files.map(f => f.id === id ? { ...f, content } : f)
-  })),
+  updateFileContent: (id, content) => set((state) => {
+    const nextFiles = state.files.map(f => f.id === id ? { ...f, content } : f);
+    persistFiles(nextFiles);
+    return { files: nextFiles };
+  }),
 
-  setActiveFile: (id) => set({ activeFileId: id }),
+  setActiveFile: (id) => set(() => {
+    persistActiveFileId(id);
+    return { activeFileId: id };
+  }),
   
   toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
   
   setSidebarVisible: (visible) => set({ sidebarVisible: visible }),
   
-  toggleTerminal: () => set((state) => ({ terminalOpen: !state.terminalOpen })),
+  toggleTerminal: () => set((state) => {
+    const next = !state.terminalOpen;
+    persistTerminalOpen(next);
+    return { terminalOpen: next };
+  }),
 
   setActiveActivityBarItem: (item) => set({ activeActivityBarItem: item, sidebarVisible: true }),
 
