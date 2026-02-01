@@ -22,6 +22,49 @@ const Explorer: React.FC = () => {
   );
   const [newFileName, setNewFileName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const fileRefs = React.useRef<Array<HTMLDivElement | null>>([]);
+  const [fileFocusIndex, setFileFocusIndex] = useState(0);
+
+  React.useEffect(() => {
+    const nextIndex = Math.max(0, files.findIndex((file) => file.id === activeFileId));
+    setFileFocusIndex((prev) => (prev !== nextIndex && nextIndex >= 0 ? nextIndex : prev));
+  }, [files, activeFileId]);
+
+  const handleFileKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (files.length === 0) {
+      return;
+    }
+
+    const lastIndex = files.length - 1;
+    let nextIndex = fileFocusIndex;
+
+    switch (event.key) {
+      case 'ArrowUp':
+        nextIndex = fileFocusIndex <= 0 ? lastIndex : fileFocusIndex - 1;
+        break;
+      case 'ArrowDown':
+        nextIndex = fileFocusIndex >= lastIndex ? 0 : fileFocusIndex + 1;
+        break;
+      case 'Home':
+        nextIndex = 0;
+        break;
+      case 'End':
+        nextIndex = lastIndex;
+        break;
+      case 'Enter':
+      case ' ':
+        event.preventDefault();
+        setActiveFile(files[fileFocusIndex].id);
+        if (window.innerWidth < 768) setSidebarVisible(false);
+        return;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    setFileFocusIndex(nextIndex);
+    fileRefs.current[nextIndex]?.focus();
+  };
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,7 +97,12 @@ const Explorer: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-1">
+      <div
+        className="flex-1 overflow-y-auto py-1"
+        role="listbox"
+        aria-label="Explorer files"
+        onKeyDown={handleFileKeyDown}
+      >
         {isCreating && (
           <form onSubmit={handleCreate} className="px-2 py-1">
             <input
@@ -69,9 +117,12 @@ const Explorer: React.FC = () => {
           </form>
         )}
 
-        {files.map((file) => (
+        {files.map((file, index) => (
           <div
             key={file.id}
+            ref={(el) => {
+              fileRefs.current[index] = el;
+            }}
             className={clsx(
               "flex items-center px-4 py-1.5 cursor-pointer text-sm group transition-colors duration-150",
               activeFileId === file.id ? "bg-vscode-hover text-white" : "text-vscode-text hover:bg-vscode-hover/50 hover:text-white"
@@ -80,6 +131,9 @@ const Explorer: React.FC = () => {
               setActiveFile(file.id);
               if (window.innerWidth < 768) setSidebarVisible(false);
             }}
+            role="option"
+            aria-selected={activeFileId === file.id}
+            tabIndex={fileFocusIndex === index ? 0 : -1}
           >
             <FileCode size={14} className="mr-2 opacity-70" />
             <span className="truncate flex-1">{file.name}</span>

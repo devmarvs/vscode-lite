@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Sidebar } from '../Sidebar/Sidebar';
 import { CodeEditor } from '../Editor/CodeEditor';
 import { CommandPalette } from '../CommandPalette/CommandPalette';
@@ -32,6 +32,8 @@ export const Layout: React.FC = () => {
   );
   const codexInstalled = isCodexInstalled(installedExtensions);
   const codexMetadata = getCodexExtensionMetadata(installedExtensionMetadata);
+  const activityButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [activityFocusIndex, setActivityFocusIndex] = useState(0);
   const dragRef = useRef<{
     type: 'sidebar' | 'terminal';
     startX?: number;
@@ -105,6 +107,64 @@ export const Layout: React.FC = () => {
     }
   };
 
+  const activityItems = useMemo(() => {
+    const base: Array<{ id: ActivityBarItem; label: string; icon: React.ReactNode; show: boolean; location: 'top' | 'bottom' }> = [
+      { id: 'explorer', label: 'Explorer', icon: <Files size={24} strokeWidth={1.5} />, show: true },
+      { id: 'search', label: 'Search', icon: <Search size={24} strokeWidth={1.5} />, show: true },
+      { id: 'git', label: 'Source Control', icon: <GitBranch size={24} strokeWidth={1.5} />, show: true },
+      { id: 'extensions', label: 'Extensions', icon: <Puzzle size={24} strokeWidth={1.5} />, show: true },
+      { id: 'codex', label: 'Codex', icon: <CodexIcon iconUrl={codexMetadata?.icon} size={24} className="text-white" />, show: codexInstalled },
+      { id: 'settings', label: 'Settings', icon: <Settings size={24} strokeWidth={1.5} />, show: true, location: 'bottom' },
+    ];
+
+    return base
+      .map((item) => ({ ...item, location: item.location ?? 'top' }))
+      .filter((item) => item.show);
+  }, [codexInstalled, codexMetadata?.icon]);
+
+  const topActivityItems = activityItems.filter((item) => item.location === 'top');
+  const bottomActivityItems = activityItems.filter((item) => item.location === 'bottom');
+
+  useEffect(() => {
+    const nextIndex = Math.max(0, activityItems.findIndex((item) => item.id === activeActivityBarItem));
+    setActivityFocusIndex((prev) => (prev !== nextIndex && nextIndex >= 0 ? nextIndex : prev));
+  }, [activityItems, activeActivityBarItem]);
+
+  const handleActivityKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (activityItems.length === 0) {
+      return;
+    }
+
+    const lastIndex = activityItems.length - 1;
+    let nextIndex = activityFocusIndex;
+
+    switch (event.key) {
+      case 'ArrowUp':
+        nextIndex = activityFocusIndex <= 0 ? lastIndex : activityFocusIndex - 1;
+        break;
+      case 'ArrowDown':
+        nextIndex = activityFocusIndex >= lastIndex ? 0 : activityFocusIndex + 1;
+        break;
+      case 'Home':
+        nextIndex = 0;
+        break;
+      case 'End':
+        nextIndex = lastIndex;
+        break;
+      case 'Enter':
+      case ' ':
+        event.preventDefault();
+        handleActivityClick(activityItems[activityFocusIndex].id);
+        return;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    setActivityFocusIndex(nextIndex);
+    activityButtonRefs.current[nextIndex]?.focus();
+  };
+
   return (
     <div className="fixed inset-0 w-full h-full bg-vscode-bg text-vscode-text overflow-hidden flex flex-col">
       <CommandPalette />
@@ -112,79 +172,58 @@ export const Layout: React.FC = () => {
 
       <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Activity Bar */}
-        <div className="layout-pane w-12 bg-vscode-activityBar flex flex-col items-center py-2 gap-1 shrink-0 z-50 border-r border-vscode-border pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pt-[env(safe-area-inset-top)]">
-          <button
-            onClick={() => handleActivityClick('explorer')}
-            className={clsx(
-              "text-gray-400 hover:text-white p-2.5 relative rounded transition-colors duration-150",
-              activeActivityBarItem === 'explorer' && sidebarVisible && "text-white bg-white/5"
-            )}
-          >
-            <Files size={24} strokeWidth={1.5} />
-            {activeActivityBarItem === 'explorer' && sidebarVisible && (
-              <div className="absolute left-0 top-1 bottom-1 w-[2px] bg-white rounded-r" />
-            )}
-          </button>
-          <button
-            onClick={() => handleActivityClick('search')}
-            className={clsx(
-              "text-gray-400 hover:text-white p-2.5 relative rounded transition-colors duration-150",
-              activeActivityBarItem === 'search' && sidebarVisible && "text-white bg-white/5"
-            )}
-          >
-            <Search size={24} strokeWidth={1.5} />
-            {activeActivityBarItem === 'search' && sidebarVisible && (
-              <div className="absolute left-0 top-1 bottom-1 w-[2px] bg-white rounded-r" />
-            )}
-          </button>
-          <button
-            onClick={() => handleActivityClick('git')}
-            className={clsx(
-              "text-gray-400 hover:text-white p-2.5 relative rounded transition-colors duration-150",
-              activeActivityBarItem === 'git' && sidebarVisible && "text-white bg-white/5"
-            )}
-          >
-            <GitBranch size={24} strokeWidth={1.5} />
-            {activeActivityBarItem === 'git' && sidebarVisible && (
-              <div className="absolute left-0 top-1 bottom-1 w-[2px] bg-white rounded-r" />
-            )}
-          </button>
-          <button
-            onClick={() => handleActivityClick('extensions')}
-            className={clsx(
-              "text-gray-400 hover:text-white p-2.5 relative rounded transition-colors duration-150",
-              activeActivityBarItem === 'extensions' && sidebarVisible && "text-white bg-white/5"
-            )}
-          >
-            <Puzzle size={24} strokeWidth={1.5} />
-            {activeActivityBarItem === 'extensions' && sidebarVisible && (
-              <div className="absolute left-0 top-1 bottom-1 w-[2px] bg-white rounded-r" />
-            )}
-          </button>
-          {codexInstalled && (
+        <div
+          className="layout-pane w-12 bg-vscode-activityBar flex flex-col items-center py-2 gap-1 shrink-0 z-50 border-r border-vscode-border pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pt-[env(safe-area-inset-top)]"
+          role="toolbar"
+          aria-label="Activity Bar"
+          onKeyDown={handleActivityKeyDown}
+        >
+          {topActivityItems.map((item, index) => (
             <button
-              onClick={() => handleActivityClick('codex')}
+              key={item.id}
+              ref={(el) => {
+                activityButtonRefs.current[index] = el;
+              }}
+              onClick={() => handleActivityClick(item.id)}
               className={clsx(
                 "text-gray-400 hover:text-white p-2.5 relative rounded transition-colors duration-150",
-                activeActivityBarItem === 'codex' && sidebarVisible && "text-white bg-white/5"
+                activeActivityBarItem === item.id && sidebarVisible && "text-white bg-white/5"
               )}
+              tabIndex={activityFocusIndex === index ? 0 : -1}
+              aria-label={item.label}
+              aria-pressed={activeActivityBarItem === item.id && sidebarVisible}
             >
-              <CodexIcon iconUrl={codexMetadata?.icon} size={24} className="text-white" />
-              {activeActivityBarItem === 'codex' && sidebarVisible && (
+              {item.icon}
+              {activeActivityBarItem === item.id && sidebarVisible && (
                 <div className="absolute left-0 top-1 bottom-1 w-[2px] bg-white rounded-r" />
               )}
             </button>
-          )}
+          ))}
           <div className="flex-1" />
-          <button
-            onClick={() => handleActivityClick('settings')}
-            className={clsx(
-              "text-gray-400 hover:text-white p-2.5 relative rounded transition-colors duration-150",
-              activeActivityBarItem === 'settings' && sidebarVisible && "text-white bg-white/5"
-            )}
-          >
-            <Settings size={24} strokeWidth={1.5} />
-          </button>
+          {bottomActivityItems.map((item, index) => {
+            const resolvedIndex = topActivityItems.length + index;
+            return (
+              <button
+                key={item.id}
+                ref={(el) => {
+                  activityButtonRefs.current[resolvedIndex] = el;
+                }}
+                onClick={() => handleActivityClick(item.id)}
+                className={clsx(
+                  "text-gray-400 hover:text-white p-2.5 relative rounded transition-colors duration-150",
+                  activeActivityBarItem === item.id && sidebarVisible && "text-white bg-white/5"
+                )}
+                tabIndex={activityFocusIndex === resolvedIndex ? 0 : -1}
+                aria-label={item.label}
+                aria-pressed={activeActivityBarItem === item.id && sidebarVisible}
+              >
+                {item.icon}
+                {activeActivityBarItem === item.id && sidebarVisible && (
+                  <div className="absolute left-0 top-1 bottom-1 w-[2px] bg-white rounded-r" />
+                )}
+              </button>
+            );
+          })}
         </div>
 
         {/* Sidebar & Editor Container */}
