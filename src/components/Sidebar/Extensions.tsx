@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Download, Loader2 } from 'lucide-react';
 import { useFileStore } from '../../store/useFileStore';
 import { isCodexExtensionId } from '../../utils/codex';
@@ -21,6 +21,8 @@ export const Extensions: React.FC = () => {
   const [extensions, setExtensions] = useState<Extension[]>([]);
   const [loading, setLoading] = useState(false);
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [listFocusIndex, setListFocusIndex] = useState(0);
+  const listItemRefs = useRef<Array<HTMLDivElement | null>>([]);
   const { installedExtensions, installedExtensionMetadata, installExtension, uninstallExtension, setActiveActivityBarItem } = useFileStore(
     useShallow((state) => ({
       installedExtensions: state.installedExtensions,
@@ -97,8 +99,7 @@ export const Extensions: React.FC = () => {
     });
   }, [extensions, installedExtensionMetadata, installedExtensions, installExtension]);
 
-  const handleInstall = (extension: Extension, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const triggerInstall = (extension: Extension) => {
     const id = `${extension.namespace}.${extension.name}`;
     if (installedExtensions[id]) return;
 
@@ -118,11 +119,20 @@ export const Extensions: React.FC = () => {
     }, 1500);
   };
 
-  const handleUninstall = (id: string, e: React.MouseEvent) => {
+  const handleInstall = (extension: Extension, e: React.MouseEvent) => {
     e.stopPropagation();
+    triggerInstall(extension);
+  };
+
+  const triggerUninstall = (id: string) => {
     if (window.confirm('Are you sure you want to uninstall this extension?')) {
       uninstallExtension(id);
     }
+  };
+
+  const handleUninstall = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    triggerUninstall(id);
   };
 
   const formatDownloads = (count: number) => {
@@ -142,6 +152,68 @@ export const Extensions: React.FC = () => {
       return { id, displayName, namespace, icon, isCodex };
     });
 
+  const hasMarketplaceResults = !loading && extensions.length > 0;
+  const focusableItemCount = installedEntries.length + (hasMarketplaceResults ? extensions.length : 0);
+  const effectiveFocusIndex = focusableItemCount === 0 ? 0 : Math.min(listFocusIndex, focusableItemCount - 1);
+
+  const handleListKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (focusableItemCount === 0) {
+      return;
+    }
+
+    const lastIndex = focusableItemCount - 1;
+    let nextIndex = effectiveFocusIndex;
+
+    switch (event.key) {
+      case 'ArrowUp':
+        nextIndex = effectiveFocusIndex <= 0 ? lastIndex : effectiveFocusIndex - 1;
+        break;
+      case 'ArrowDown':
+        nextIndex = effectiveFocusIndex >= lastIndex ? 0 : effectiveFocusIndex + 1;
+        break;
+      case 'Home':
+        nextIndex = 0;
+        break;
+      case 'End':
+        nextIndex = lastIndex;
+        break;
+      case 'Enter':
+      case ' ':
+        event.preventDefault();
+        if (effectiveFocusIndex < installedEntries.length) {
+          const installed = installedEntries[effectiveFocusIndex];
+          if (installed.isCodex) {
+            setActiveActivityBarItem('codex');
+          } else {
+            triggerUninstall(installed.id);
+          }
+          return;
+        }
+
+        if (hasMarketplaceResults) {
+          const extension = extensions[effectiveFocusIndex - installedEntries.length];
+          const id = `${extension.namespace}.${extension.name}`;
+          if (installedExtensions[id]) {
+            const displayName = extension.displayName || extension.name;
+            if (isCodexExtensionId(id) || displayName.toLowerCase().includes('codex')) {
+              setActiveActivityBarItem('codex');
+            } else {
+              triggerUninstall(id);
+            }
+          } else {
+            triggerInstall(extension);
+          }
+        }
+        return;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    setListFocusIndex(nextIndex);
+    listItemRefs.current[nextIndex]?.focus();
+  };
+
   return (
     <div className="flex flex-col h-full text-vscode-text">
       <div className="panel-header">
@@ -152,20 +224,32 @@ export const Extensions: React.FC = () => {
           className="w-full bg-vscode-input text-white text-sm px-2 py-1 border border-vscode-border focus:outline-none focus:border-vscode-statusBar"
           placeholder="Search Extensions in Marketplace"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setListFocusIndex(0);
+          }}
           onKeyDown={(e) => e.stopPropagation()}
           autoFocus
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto" role="listbox" aria-label="Extensions list" onKeyDown={handleListKeyDown}>
         {installedEntries.length > 0 && (
           <div className="border-b border-vscode-border/40">
             <div className="px-4 py-2 panel-section-title">
               Installed
             </div>
-            {installedEntries.map((ext) => (
-              <div key={ext.id} className="px-3 py-2.5 hover:bg-vscode-hover flex gap-3 border-t border-vscode-border/20 items-center transition-colors duration-150">
+            {installedEntries.map((ext, index) => (
+              <div
+                key={ext.id}
+                ref={(el) => {
+                  listItemRefs.current[index] = el;
+                }}
+                className="px-3 py-2.5 hover:bg-vscode-hover flex gap-3 border-t border-vscode-border/20 items-center transition-colors duration-150"
+                role="option"
+                aria-selected={effectiveFocusIndex === index}
+                tabIndex={effectiveFocusIndex === index ? 0 : -1}
+              >
                 <div
                   className="shrink-0 bg-gray-700 flex items-center justify-center overflow-hidden rounded"
                   style={{ width: '36px', height: '36px', minWidth: '36px', minHeight: '36px' }}
@@ -224,9 +308,19 @@ export const Extensions: React.FC = () => {
             const isInstalling = installing[id];
             const displayName = ext.displayName || ext.name;
             const isCodex = isCodexExtensionId(id) || displayName.toLowerCase().includes('codex');
+            const listIndex = installedEntries.length + index;
 
             return (
-              <div key={`${id}-${index}`} className="px-3 py-2.5 hover:bg-vscode-hover cursor-pointer flex gap-3 border-b border-vscode-border/20 group items-center transition-colors duration-150">
+              <div
+                key={`${id}-${index}`}
+                ref={(el) => {
+                  listItemRefs.current[listIndex] = el;
+                }}
+                className="px-3 py-2.5 hover:bg-vscode-hover cursor-pointer flex gap-3 border-b border-vscode-border/20 group items-center transition-colors duration-150"
+                role="option"
+                aria-selected={effectiveFocusIndex === listIndex}
+                tabIndex={effectiveFocusIndex === listIndex ? 0 : -1}
+              >
                 {/* Extension Icon */}
                 <div
                   className="shrink-0 bg-gray-700 flex items-center justify-center overflow-hidden rounded"
