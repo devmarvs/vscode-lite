@@ -15,7 +15,7 @@ import { CodexIcon } from '../Codex/CodexIcon';
 import { useShallow } from 'zustand/shallow';
 
 export const Layout: React.FC = () => {
-  const { toggleSidebar, sidebarVisible, activeActivityBarItem, setActiveActivityBarItem, installedExtensions, installedExtensionMetadata, sidebarWidth, setSidebarWidth, terminalOpen, terminalHeight, setTerminalHeight } = useFileStore(
+  const { toggleSidebar, sidebarVisible, activeActivityBarItem, setActiveActivityBarItem, installedExtensions, installedExtensionMetadata, sidebarWidth, setSidebarWidth, terminalOpen, terminalHeight, setTerminalHeight, saveActiveFile } = useFileStore(
     useShallow((state) => ({
       toggleSidebar: state.toggleSidebar,
       sidebarVisible: state.sidebarVisible,
@@ -28,6 +28,7 @@ export const Layout: React.FC = () => {
       terminalOpen: state.terminalOpen,
       terminalHeight: state.terminalHeight,
       setTerminalHeight: state.setTerminalHeight,
+      saveActiveFile: state.saveActiveFile,
     }))
   );
   const codexInstalled = isCodexInstalled(installedExtensions);
@@ -79,6 +80,18 @@ export const Layout: React.FC = () => {
     };
   }, [setSidebarWidth, setTerminalHeight]);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        saveActiveFile();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [saveActiveFile]);
+
   const beginSidebarResize = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) {
       return;
@@ -108,7 +121,7 @@ export const Layout: React.FC = () => {
   };
 
   const activityItems = useMemo(() => {
-    const base: Array<{ id: ActivityBarItem; label: string; icon: React.ReactNode; show: boolean; location: 'top' | 'bottom' }> = [
+    const base: Array<{ id: ActivityBarItem; label: string; icon: React.ReactNode; show: boolean; location?: 'top' | 'bottom' }> = [
       { id: 'explorer', label: 'Explorer', icon: <Files size={24} strokeWidth={1.5} />, show: true },
       { id: 'search', label: 'Search', icon: <Search size={24} strokeWidth={1.5} />, show: true },
       { id: 'git', label: 'Source Control', icon: <GitBranch size={24} strokeWidth={1.5} />, show: true },

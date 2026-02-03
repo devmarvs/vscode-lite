@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useFileStore } from '../../store/useFileStore';
+import { isFileDirty, useFileStore } from '../../store/useFileStore';
 import { X } from 'lucide-react';
 import clsx from 'clsx';
 import { useShallow } from 'zustand/shallow';
@@ -77,11 +77,13 @@ export const Tabs: React.FC = () => {
           role="tab"
           tabIndex={tabFocusIndex === index ? 0 : -1}
           aria-selected={activeFileId === file.id}
+          title={file.path}
         >
           <div className="flex items-center gap-2 w-full">
             {/* Icon based on language would go here */}
             <span className="text-blue-400 text-xs font-bold">TS</span>
             <span className="truncate text-xs flex-1">{file.name}</span>
+            {isFileDirty(file) && <span className="text-yellow-400 text-[10px] leading-none">●</span>}
             <button
               className={clsx(
                 "p-0.5 rounded-md hover:bg-gray-600",

@@ -16,9 +16,149 @@ export interface EditorSettings {
 export interface File {
   id: string;
   name: string;
+  path: string;
   content: string;
+  savedContent: string;
   language: string;
 }
+
+export const isFileDirty = (file: File) => file.content !== file.savedContent;
+
+export const normalizeWorkspacePath = (rawPath: string) =>
+  rawPath
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .join('/');
+
+export const getFileNameFromPath = (path: string) => {
+  const normalized = normalizeWorkspacePath(path);
+  const segments = normalized.split('/');
+  return segments[segments.length - 1] ?? normalized;
+};
+
+export const getParentFolderPath = (path: string) => {
+  const normalized = normalizeWorkspacePath(path);
+  const segments = normalized.split('/');
+  segments.pop();
+  return segments.join('/');
+};
+
+const collectFolderHierarchy = (path: string) => {
+  const normalized = normalizeWorkspacePath(path);
+  if (!normalized) {
+    return [] as string[];
+  }
+
+  const segments = normalized.split('/');
+  const folders: string[] = [];
+  for (let index = 1; index <= segments.length; index += 1) {
+    folders.push(segments.slice(0, index).join('/'));
+  }
+  return folders;
+};
+
+const collectAncestorFolders = (path: string) => collectFolderHierarchy(getParentFolderPath(path));
+
+const splitFileName = (name: string) => {
+  const lastDot = name.lastIndexOf('.');
+  if (lastDot <= 0) {
+    return { base: name, extension: '' };
+  }
+
+  return {
+    base: name.slice(0, lastDot),
+    extension: name.slice(lastDot),
+  };
+};
+
+const sortPaths = (paths: string[]) =>
+  [...paths].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+const mergeFolderPaths = (...groups: string[][]) => {
+  const all = new Set<string>();
+  groups.forEach((group) => {
+    group
+      .map((path) => normalizeWorkspacePath(path))
+      .filter(Boolean)
+      .forEach((path) => {
+        all.add(path);
+      });
+  });
+  return sortPaths(Array.from(all));
+};
+
+const ensureUniquePath = (path: string, hasPath: (candidate: string) => boolean) => {
+  const normalized = normalizeWorkspacePath(path);
+  if (!normalized || !hasPath(normalized)) {
+    return normalized;
+  }
+
+  const parent = getParentFolderPath(normalized);
+  const fileName = getFileNameFromPath(normalized);
+  const { base, extension } = splitFileName(fileName);
+
+  let index = 1;
+  while (index < 1000) {
+    const candidateName = `${base}-${index}${extension}`;
+    const candidatePath = parent ? `${parent}/${candidateName}` : candidateName;
+    if (!hasPath(candidatePath)) {
+      return candidatePath;
+    }
+    index += 1;
+  }
+
+  return normalized;
+};
+
+export const inferLanguageFromPath = (path: string) => {
+  const extension = getFileNameFromPath(path).split('.').pop()?.toLowerCase();
+
+  switch (extension) {
+    case 'ts':
+    case 'tsx':
+      return 'typescript';
+    case 'js':
+    case 'jsx':
+      return 'javascript';
+    case 'css':
+      return 'css';
+    case 'html':
+      return 'html';
+    case 'json':
+      return 'json';
+    case 'md':
+      return 'markdown';
+    default:
+      return 'plaintext';
+  }
+};
+
+const inferFolderPathsFromFiles = (files: File[]) => {
+  const folders = new Set<string>();
+  files.forEach((file) => {
+    collectAncestorFolders(file.path).forEach((folder) => folders.add(folder));
+  });
+  return sortPaths(Array.from(folders));
+};
+
+const ensureUniqueFilePath = (path: string, files: File[], excludeFileId?: string) =>
+  ensureUniquePath(path, (candidate) =>
+    files.some((file) => file.path === candidate && file.id !== excludeFileId)
+  );
+
+const createFile = (id: string, path: string, language: string, content: string, savedContent?: string): File => {
+  const normalizedPath = normalizeWorkspacePath(path);
+  return {
+    id,
+    path: normalizedPath,
+    name: getFileNameFromPath(normalizedPath),
+    content,
+    savedContent: savedContent ?? content,
+    language,
+  };
+};
 
 export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   fontSize: 14,
@@ -45,6 +185,7 @@ const CODEX_API_KEY_SESSION_KEY = 'lite_vscode_codex_api_key';
 const SIDEBAR_WIDTH_STORAGE_KEY = 'lite_vscode_sidebar_width';
 const TERMINAL_HEIGHT_STORAGE_KEY = 'lite_vscode_terminal_height';
 const FILES_STORAGE_KEY = 'lite_vscode_files';
+const FOLDERS_STORAGE_KEY = 'lite_vscode_folders';
 const ACTIVE_FILE_STORAGE_KEY = 'lite_vscode_active_file';
 const TERMINAL_OPEN_STORAGE_KEY = 'lite_vscode_terminal_open';
 
@@ -59,9 +200,10 @@ const normalizeEditorSettings = (settings: Partial<EditorSettings>): EditorSetti
     wordWrap: settings.wordWrap ?? DEFAULT_EDITOR_SETTINGS.wordWrap,
     minimap: settings.minimap ?? DEFAULT_EDITOR_SETTINGS.minimap,
     lineNumbers: settings.lineNumbers ?? DEFAULT_EDITOR_SETTINGS.lineNumbers,
-    renderWhitespace: renderWhitespace === 'none' || renderWhitespace === 'boundary' || renderWhitespace === 'all'
-      ? renderWhitespace
-      : DEFAULT_EDITOR_SETTINGS.renderWhitespace,
+    renderWhitespace:
+      renderWhitespace === 'none' || renderWhitespace === 'boundary' || renderWhitespace === 'all'
+        ? renderWhitespace
+        : DEFAULT_EDITOR_SETTINGS.renderWhitespace,
   };
 };
 
@@ -69,11 +211,11 @@ const clampSidebarWidth = (value: number) => Math.min(520, Math.max(200, value))
 const clampTerminalHeight = (value: number) => Math.min(480, Math.max(120, value));
 
 const initialFiles: File[] = [
-  {
-    id: '1',
-    name: 'App.tsx',
-    language: 'typescript',
-    content: `import React from 'react';
+  createFile(
+    '1',
+    'src/App.tsx',
+    'typescript',
+    `import React from 'react';
 
 export default function App() {
   return (
@@ -82,19 +224,9 @@ export default function App() {
     </div>
   );
 }`
-  },
-  {
-    id: '2',
-    name: 'utils.ts',
-    language: 'typescript',
-    content: `export const add = (a: number, b: number) => a + b;`
-  },
-  {
-    id: '3',
-    name: 'styles.css',
-    language: 'css',
-    content: `body { background: #1e1e1e; color: #fff; }`
-  }
+  ),
+  createFile('2', 'src/utils.ts', 'typescript', `export const add = (a: number, b: number) => a + b;`),
+  createFile('3', 'src/styles.css', 'css', `body { background: #1e1e1e; color: #fff; }`),
 ];
 
 const loadEditorSettings = (): EditorSettings => {
@@ -151,7 +283,8 @@ const loadCodexSettings = (): CodexSettings => {
     }
 
     const parsed = JSON.parse(stored) as Partial<CodexSettings>;
-    const model = typeof parsed.model === 'string' && parsed.model.trim() ? parsed.model.trim() : DEFAULT_CODEX_SETTINGS.model;
+    const model =
+      typeof parsed.model === 'string' && parsed.model.trim() ? parsed.model.trim() : DEFAULT_CODEX_SETTINGS.model;
     return { model };
   } catch {
     return { ...DEFAULT_CODEX_SETTINGS };
@@ -205,7 +338,7 @@ const loadSidebarWidth = (): number => {
 
   try {
     const stored = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
-    const parsed = stored ? Number(stored) : NaN;
+    const parsed = stored ? Number(stored) : Number.NaN;
     if (!Number.isFinite(parsed)) {
       return 260;
     }
@@ -234,7 +367,7 @@ const loadTerminalHeight = (): number => {
 
   try {
     const stored = window.localStorage.getItem(TERMINAL_HEIGHT_STORAGE_KEY);
-    const parsed = stored ? Number(stored) : NaN;
+    const parsed = stored ? Number(stored) : Number.NaN;
     if (!Number.isFinite(parsed)) {
       return 192;
     }
@@ -256,12 +389,30 @@ const persistTerminalHeight = (height: number) => {
   }
 };
 
-const isValidFile = (file: unknown): file is File =>
-  !!file
-  && typeof (file as File).id === 'string'
-  && typeof (file as File).name === 'string'
-  && typeof (file as File).content === 'string'
-  && typeof (file as File).language === 'string';
+const normalizeStoredFile = (value: unknown): File | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const maybeFile = value as Partial<File> & { path?: string; name?: string };
+  if (typeof maybeFile.id !== 'string' || typeof maybeFile.content !== 'string') {
+    return null;
+  }
+
+  const pathRaw = typeof maybeFile.path === 'string' ? maybeFile.path : maybeFile.name;
+  if (typeof pathRaw !== 'string') {
+    return null;
+  }
+
+  const path = normalizeWorkspacePath(pathRaw);
+  if (!path) {
+    return null;
+  }
+
+  const savedContent = typeof maybeFile.savedContent === 'string' ? maybeFile.savedContent : maybeFile.content;
+  const language = typeof maybeFile.language === 'string' ? maybeFile.language : inferLanguageFromPath(path);
+  return createFile(maybeFile.id, path, language, maybeFile.content, savedContent);
+};
 
 const loadFiles = (): File[] => {
   if (typeof window === 'undefined') {
@@ -279,8 +430,11 @@ const loadFiles = (): File[] => {
       return [...initialFiles];
     }
 
-    const next = parsed.filter(isValidFile);
-    return next.length > 0 ? next : [...initialFiles];
+    const files = parsed
+      .map((entry) => normalizeStoredFile(entry))
+      .filter((entry): entry is File => Boolean(entry));
+
+    return files.length > 0 ? files : [...initialFiles];
   } catch {
     return [...initialFiles];
   }
@@ -293,6 +447,46 @@ const persistFiles = (files: File[]) => {
 
   try {
     window.localStorage.setItem(FILES_STORAGE_KEY, JSON.stringify(files));
+  } catch {
+    // Ignore storage failures.
+  }
+};
+
+const loadFolders = (files: File[]) => {
+  const inferred = inferFolderPathsFromFiles(files);
+  if (typeof window === 'undefined') {
+    return inferred;
+  }
+
+  try {
+    const stored = window.localStorage.getItem(FOLDERS_STORAGE_KEY);
+    if (!stored) {
+      return inferred;
+    }
+
+    const parsed = JSON.parse(stored);
+    if (!Array.isArray(parsed)) {
+      return inferred;
+    }
+
+    const storedPaths = parsed
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => normalizeWorkspacePath(entry))
+      .filter(Boolean);
+
+    return mergeFolderPaths(storedPaths, inferred);
+  } catch {
+    return inferred;
+  }
+};
+
+const persistFolders = (folders: string[]) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(folders));
   } catch {
     // Ignore storage failures.
   }
@@ -411,6 +605,7 @@ export interface CodexMessage {
 
 interface FileStore {
   files: File[];
+  folders: string[];
   activeFileId: string | null;
   sidebarVisible: boolean;
   terminalOpen: boolean;
@@ -425,9 +620,14 @@ interface FileStore {
   codexMessages: CodexMessage[];
   sidebarWidth: number;
   terminalHeight: number;
-  
+
   // Actions
-  addFile: (name: string, language: string) => void;
+  addFile: (path: string, language?: string) => void;
+  addFolder: (path: string) => void;
+  renameFile: (id: string, path: string) => void;
+  renameFolder: (fromPath: string, toPath: string) => void;
+  saveFile: (id: string) => void;
+  saveActiveFile: () => void;
   deleteFile: (id: string) => void;
   updateFileContent: (id: string, content: string) => void;
   setActiveFile: (id: string) => void;
@@ -453,10 +653,12 @@ interface FileStore {
 }
 
 const initialFilesState = loadFiles();
+const initialFoldersState = loadFolders(initialFilesState);
 const initialActiveFileId = loadActiveFileId(initialFilesState);
 
-export const useFileStore = create<FileStore>((set) => ({
+export const useFileStore = create<FileStore>((set, get) => ({
   files: initialFilesState,
+  folders: initialFoldersState,
   activeFileId: initialActiveFileId,
   sidebarVisible: true,
   terminalOpen: loadTerminalOpen(),
@@ -472,95 +674,243 @@ export const useFileStore = create<FileStore>((set) => ({
   sidebarWidth: loadSidebarWidth(),
   terminalHeight: loadTerminalHeight(),
 
-  addFile: (name, language) => set((state) => {
-    const newFile: File = {
-      id: crypto.randomUUID(),
-      name,
-      language,
-      content: ''
-    };
-    const nextFiles = [...state.files, newFile];
-    persistFiles(nextFiles);
-    persistActiveFileId(newFile.id);
-    return { files: nextFiles, activeFileId: newFile.id };
-  }),
+  addFile: (path, language) =>
+    set((state) => {
+      const normalizedPath = normalizeWorkspacePath(path);
+      if (!normalizedPath) {
+        return {};
+      }
 
-  deleteFile: (id) => set((state) => {
-    const nextFiles = state.files.filter(f => f.id !== id);
-    const nextActive = state.activeFileId === id ? (nextFiles[0]?.id ?? null) : state.activeFileId;
-    persistFiles(nextFiles);
-    persistActiveFileId(nextActive);
-    return {
-      files: nextFiles,
-      activeFileId: nextActive
-    };
-  }),
+      const uniquePath = ensureUniqueFilePath(normalizedPath, state.files);
+      const nextLanguage = language?.trim() || inferLanguageFromPath(uniquePath);
+      const newFile = createFile(crypto.randomUUID(), uniquePath, nextLanguage, '', '');
+      const nextFiles = [...state.files, newFile];
+      const nextFolders = mergeFolderPaths(state.folders, collectAncestorFolders(uniquePath));
 
-  updateFileContent: (id, content) => set((state) => {
-    const nextFiles = state.files.map(f => f.id === id ? { ...f, content } : f);
-    persistFiles(nextFiles);
-    return { files: nextFiles };
-  }),
+      persistFiles(nextFiles);
+      persistFolders(nextFolders);
+      persistActiveFileId(newFile.id);
 
-  setActiveFile: (id) => set(() => {
-    persistActiveFileId(id);
-    return { activeFileId: id };
-  }),
-  
+      return { files: nextFiles, folders: nextFolders, activeFileId: newFile.id };
+    }),
+
+  addFolder: (path) =>
+    set((state) => {
+      const normalizedPath = normalizeWorkspacePath(path);
+      if (!normalizedPath) {
+        return {};
+      }
+
+      const nextFolders = mergeFolderPaths(state.folders, collectFolderHierarchy(normalizedPath));
+      persistFolders(nextFolders);
+      return { folders: nextFolders };
+    }),
+
+  renameFile: (id, path) =>
+    set((state) => {
+      const existing = state.files.find((file) => file.id === id);
+      if (!existing) {
+        return {};
+      }
+
+      const normalizedPath = normalizeWorkspacePath(path);
+      if (!normalizedPath) {
+        return {};
+      }
+
+      const nextPath = ensureUniqueFilePath(normalizedPath, state.files, id);
+      if (nextPath === existing.path) {
+        return {};
+      }
+
+      const nextFiles = state.files.map((file) =>
+        file.id === id
+          ? {
+              ...file,
+              path: nextPath,
+              name: getFileNameFromPath(nextPath),
+              language: inferLanguageFromPath(nextPath),
+            }
+          : file
+      );
+
+      const nextFolders = mergeFolderPaths(state.folders, collectAncestorFolders(nextPath));
+      persistFiles(nextFiles);
+      persistFolders(nextFolders);
+      return { files: nextFiles, folders: nextFolders };
+    }),
+
+  renameFolder: (fromPath, toPath) =>
+    set((state) => {
+      const normalizedFrom = normalizeWorkspacePath(fromPath);
+      const normalizedTo = normalizeWorkspacePath(toPath);
+
+      if (!normalizedFrom || !normalizedTo || normalizedFrom === normalizedTo) {
+        return {};
+      }
+
+      if (normalizedTo.startsWith(`${normalizedFrom}/`)) {
+        return {};
+      }
+
+      const allFolders = mergeFolderPaths(state.folders, inferFolderPathsFromFiles(state.files));
+      const moveFolder = (path: string) => path === normalizedFrom || path.startsWith(`${normalizedFrom}/`);
+      if (!allFolders.some(moveFolder)) {
+        return {};
+      }
+
+      const movedFileIds = new Set(
+        state.files.filter((file) => file.path.startsWith(`${normalizedFrom}/`)).map((file) => file.id)
+      );
+      const usedPaths = new Set(state.files.filter((file) => !movedFileIds.has(file.id)).map((file) => file.path));
+
+      const nextFiles = state.files.map((file) => {
+        if (!movedFileIds.has(file.id)) {
+          return file;
+        }
+
+        const desiredPath = `${normalizedTo}${file.path.slice(normalizedFrom.length)}`;
+        const uniquePath = ensureUniquePath(desiredPath, (candidate) => usedPaths.has(candidate));
+        usedPaths.add(uniquePath);
+
+        return {
+          ...file,
+          path: uniquePath,
+          name: getFileNameFromPath(uniquePath),
+          language: inferLanguageFromPath(uniquePath),
+        };
+      });
+
+      const movedFolders = allFolders.filter(moveFolder).map((path) => `${normalizedTo}${path.slice(normalizedFrom.length)}`);
+      const untouchedFolders = allFolders.filter((path) => !moveFolder(path));
+      const nextFolders = mergeFolderPaths(
+        untouchedFolders,
+        movedFolders,
+        collectFolderHierarchy(normalizedTo),
+        inferFolderPathsFromFiles(nextFiles)
+      );
+
+      persistFiles(nextFiles);
+      persistFolders(nextFolders);
+      return { files: nextFiles, folders: nextFolders };
+    }),
+
+  saveFile: (id) =>
+    set((state) => {
+      let changed = false;
+      const nextFiles = state.files.map((file) => {
+        if (file.id !== id || file.savedContent === file.content) {
+          return file;
+        }
+        changed = true;
+        return { ...file, savedContent: file.content };
+      });
+
+      if (!changed) {
+        return {};
+      }
+
+      persistFiles(nextFiles);
+      return { files: nextFiles };
+    }),
+
+  saveActiveFile: () => {
+    const activeFileId = get().activeFileId;
+    if (!activeFileId) {
+      return;
+    }
+    get().saveFile(activeFileId);
+  },
+
+  deleteFile: (id) =>
+    set((state) => {
+      const nextFiles = state.files.filter((file) => file.id !== id);
+      const nextActive = state.activeFileId === id ? (nextFiles[0]?.id ?? null) : state.activeFileId;
+
+      persistFiles(nextFiles);
+      persistActiveFileId(nextActive);
+      return {
+        files: nextFiles,
+        activeFileId: nextActive,
+      };
+    }),
+
+  updateFileContent: (id, content) =>
+    set((state) => {
+      const nextFiles = state.files.map((file) => (file.id === id ? { ...file, content } : file));
+      persistFiles(nextFiles);
+      return { files: nextFiles };
+    }),
+
+  setActiveFile: (id) =>
+    set((state) => {
+      if (!state.files.some((file) => file.id === id)) {
+        return {};
+      }
+
+      persistActiveFileId(id);
+      return { activeFileId: id };
+    }),
+
   toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
-  
+
   setSidebarVisible: (visible) => set({ sidebarVisible: visible }),
-  
-  toggleTerminal: () => set((state) => {
-    const next = !state.terminalOpen;
-    persistTerminalOpen(next);
-    return { terminalOpen: next };
-  }),
+
+  toggleTerminal: () =>
+    set((state) => {
+      const next = !state.terminalOpen;
+      persistTerminalOpen(next);
+      return { terminalOpen: next };
+    }),
 
   setActiveActivityBarItem: (item) => set({ activeActivityBarItem: item, sidebarVisible: true }),
 
-  updateEditorSettings: (settings) => set((state) => {
-    const next = normalizeEditorSettings({ ...state.editorSettings, ...settings });
-    persistEditorSettings(next);
-    return { editorSettings: next };
-  }),
+  updateEditorSettings: (settings) =>
+    set((state) => {
+      const next = normalizeEditorSettings({ ...state.editorSettings, ...settings });
+      persistEditorSettings(next);
+      return { editorSettings: next };
+    }),
 
-  resetEditorSettings: () => set(() => {
-    const next = { ...DEFAULT_EDITOR_SETTINGS };
-    persistEditorSettings(next);
-    return { editorSettings: next };
-  }),
+  resetEditorSettings: () =>
+    set(() => {
+      const next = { ...DEFAULT_EDITOR_SETTINGS };
+      persistEditorSettings(next);
+      return { editorSettings: next };
+    }),
 
-  installExtension: (id, metadata) => set((state) => {
-    const nextInstalled = { ...state.installedExtensions, [id]: true };
-    const nextMetadata = metadata
-      ? { ...state.installedExtensionMetadata, [id]: metadata }
-      : state.installedExtensionMetadata;
+  installExtension: (id, metadata) =>
+    set((state) => {
+      const nextInstalled = { ...state.installedExtensions, [id]: true };
+      const nextMetadata = metadata
+        ? { ...state.installedExtensionMetadata, [id]: metadata }
+        : state.installedExtensionMetadata;
 
-    persistInstalledExtensions(nextInstalled);
-    if (metadata) {
-      persistInstalledExtensionMetadata(nextMetadata);
-    }
+      persistInstalledExtensions(nextInstalled);
+      if (metadata) {
+        persistInstalledExtensionMetadata(nextMetadata);
+      }
 
-    return {
-      installedExtensions: nextInstalled,
-      installedExtensionMetadata: nextMetadata,
-    };
-  }),
+      return {
+        installedExtensions: nextInstalled,
+        installedExtensionMetadata: nextMetadata,
+      };
+    }),
 
-  uninstallExtension: (id) => set((state) => {
-    const nextInstalled = { ...state.installedExtensions };
-    delete nextInstalled[id];
+  uninstallExtension: (id) =>
+    set((state) => {
+      const nextInstalled = { ...state.installedExtensions };
+      delete nextInstalled[id];
 
-    const nextMetadata = { ...state.installedExtensionMetadata };
-    if (nextMetadata[id]) {
-      delete nextMetadata[id];
-      persistInstalledExtensionMetadata(nextMetadata);
-    }
+      const nextMetadata = { ...state.installedExtensionMetadata };
+      if (nextMetadata[id]) {
+        delete nextMetadata[id];
+        persistInstalledExtensionMetadata(nextMetadata);
+      }
 
-    persistInstalledExtensions(nextInstalled);
-    return { installedExtensions: nextInstalled, installedExtensionMetadata: nextMetadata };
-  }),
+      persistInstalledExtensions(nextInstalled);
+      return { installedExtensions: nextInstalled, installedExtensionMetadata: nextMetadata };
+    }),
 
   setCodexApiKey: (key) => {
     const trimmed = key.trim();
@@ -573,12 +923,13 @@ export const useFileStore = create<FileStore>((set) => ({
     set({ codexApiKey: null });
   },
 
-  setCodexModel: (model) => set((state) => {
-    const trimmed = model.trim() || DEFAULT_CODEX_SETTINGS.model;
-    const next = { ...state.codexSettings, model: trimmed };
-    persistCodexSettings(next);
-    return { codexSettings: next };
-  }),
+  setCodexModel: (model) =>
+    set((state) => {
+      const trimmed = model.trim() || DEFAULT_CODEX_SETTINGS.model;
+      const next = { ...state.codexSettings, model: trimmed };
+      persistCodexSettings(next);
+      return { codexSettings: next };
+    }),
 
   toggleCodexDrawer: () => set((state) => ({ codexDrawerOpen: !state.codexDrawerOpen })),
 
@@ -592,15 +943,17 @@ export const useFileStore = create<FileStore>((set) => ({
 
   clearCodexMessages: () => set({ codexMessages: [] }),
 
-  setSidebarWidth: (width) => set(() => {
-    const next = clampSidebarWidth(width);
-    persistSidebarWidth(next);
-    return { sidebarWidth: next };
-  }),
+  setSidebarWidth: (width) =>
+    set(() => {
+      const next = clampSidebarWidth(width);
+      persistSidebarWidth(next);
+      return { sidebarWidth: next };
+    }),
 
-  setTerminalHeight: (height) => set(() => {
-    const next = clampTerminalHeight(height);
-    persistTerminalHeight(next);
-    return { terminalHeight: next };
-  }),
+  setTerminalHeight: (height) =>
+    set(() => {
+      const next = clampTerminalHeight(height);
+      persistTerminalHeight(next);
+      return { terminalHeight: next };
+    }),
 }));

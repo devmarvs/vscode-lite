@@ -1,86 +1,362 @@
-import React, { useState } from 'react';
-import { useFileStore } from '../../store/useFileStore';
-import { FileCode, FilePlus, Trash2, X } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import {
+  ChevronDown,
+  ChevronRight,
+  FileCode,
+  FilePlus,
+  Folder,
+  FolderPlus,
+  Pencil,
+  Trash2,
+  X,
+} from 'lucide-react';
+import clsx from 'clsx';
+import { useShallow } from 'zustand/shallow';
+import {
+  getFileNameFromPath,
+  getParentFolderPath,
+  isFileDirty,
+  useFileStore,
+} from '../../store/useFileStore';
 import { Search } from './Search';
 import { SourceControl } from './SourceControl';
 import { Extensions } from './Extensions';
 import { Settings } from './Settings';
 import { CodexPanel } from '../Codex/CodexPanel';
-import clsx from 'clsx';
-import { useShallow } from 'zustand/shallow';
+
+type ExplorerFolderNode = {
+  path: string;
+  name: string;
+  folders: ExplorerFolderNode[];
+  files: Array<ReturnType<typeof useFileStore.getState>['files'][number]>;
+};
+
+type ExplorerEditState =
+  | {
+      type: 'file';
+      id: string;
+      parentPath: string;
+      value: string;
+    }
+  | {
+      type: 'folder';
+      id: string;
+      parentPath: string;
+      value: string;
+    };
+
+const sortByName = (left: string, right: string) =>
+  left.localeCompare(right, undefined, { sensitivity: 'base' });
+
+const buildExplorerTree = (
+  files: Array<ReturnType<typeof useFileStore.getState>['files'][number]>,
+  folders: string[]
+) => {
+  const root: ExplorerFolderNode = { path: '', name: '', folders: [], files: [] };
+  const folderMap = new Map<string, ExplorerFolderNode>([['', root]]);
+
+  const sortedFolders = [...folders].sort((left, right) => {
+    const leftDepth = left.split('/').length;
+    const rightDepth = right.split('/').length;
+    if (leftDepth === rightDepth) {
+      return sortByName(left, right);
+    }
+    return leftDepth - rightDepth;
+  });
+
+  sortedFolders.forEach((folderPath) => {
+    if (folderMap.has(folderPath)) {
+      return;
+    }
+
+    const name = getFileNameFromPath(folderPath);
+    const parentPath = getParentFolderPath(folderPath);
+    const parent = folderMap.get(parentPath) ?? root;
+    const node: ExplorerFolderNode = {
+      path: folderPath,
+      name,
+      folders: [],
+      files: [],
+    };
+    parent.folders.push(node);
+    folderMap.set(folderPath, node);
+  });
+
+  files.forEach((file) => {
+    const parentPath = getParentFolderPath(file.path);
+    const parent = folderMap.get(parentPath) ?? root;
+    parent.files.push(file);
+  });
+
+  const sortNodes = (node: ExplorerFolderNode) => {
+    node.folders.sort((left, right) => sortByName(left.name, right.name));
+    node.files.sort((left, right) => sortByName(left.name, right.name));
+    node.folders.forEach(sortNodes);
+  };
+
+  sortNodes(root);
+  return root;
+};
 
 const Explorer: React.FC = () => {
-  const { files, activeFileId, setActiveFile, deleteFile, addFile, setSidebarVisible } = useFileStore(
+  const {
+    files,
+    folders,
+    activeFileId,
+    setActiveFile,
+    deleteFile,
+    addFile,
+    addFolder,
+    renameFile,
+    renameFolder,
+    setSidebarVisible,
+  } = useFileStore(
     useShallow((state) => ({
       files: state.files,
+      folders: state.folders,
       activeFileId: state.activeFileId,
       setActiveFile: state.setActiveFile,
       deleteFile: state.deleteFile,
       addFile: state.addFile,
+      addFolder: state.addFolder,
+      renameFile: state.renameFile,
+      renameFolder: state.renameFolder,
       setSidebarVisible: state.setSidebarVisible,
     }))
   );
-  const [newFileName, setNewFileName] = useState('');
-  const [isCreating, setIsCreating] = useState(false);
-  const fileRefs = React.useRef<Array<HTMLDivElement | null>>([]);
-  const [fileFocusIndex, setFileFocusIndex] = useState(0);
+  const [createMode, setCreateMode] = useState<'file' | 'folder' | null>(null);
+  const [createValue, setCreateValue] = useState('');
+  const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
+  const [editing, setEditing] = useState<ExplorerEditState | null>(null);
 
-  React.useEffect(() => {
-    const nextIndex = Math.max(0, files.findIndex((file) => file.id === activeFileId));
-    setFileFocusIndex((prev) => (prev !== nextIndex && nextIndex >= 0 ? nextIndex : prev));
-  }, [files, activeFileId]);
+  const tree = useMemo(() => buildExplorerTree(files, folders), [files, folders]);
 
-  const handleFileKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (files.length === 0) {
+  const openFile = (fileId: string) => {
+    setActiveFile(fileId);
+    if (window.innerWidth < 768) {
+      setSidebarVisible(false);
+    }
+  };
+
+  const toggleFolder = (path: string) => {
+    setCollapsedFolders((state) => ({
+      ...state,
+      [path]: !state[path],
+    }));
+  };
+
+  const handleCreate = (event: React.FormEvent) => {
+    event.preventDefault();
+    const trimmed = createValue.trim();
+    if (!trimmed || !createMode) {
       return;
     }
 
-    const lastIndex = files.length - 1;
-    let nextIndex = fileFocusIndex;
-
-    switch (event.key) {
-      case 'ArrowUp':
-        nextIndex = fileFocusIndex <= 0 ? lastIndex : fileFocusIndex - 1;
-        break;
-      case 'ArrowDown':
-        nextIndex = fileFocusIndex >= lastIndex ? 0 : fileFocusIndex + 1;
-        break;
-      case 'Home':
-        nextIndex = 0;
-        break;
-      case 'End':
-        nextIndex = lastIndex;
-        break;
-      case 'Enter':
-      case ' ':
-        event.preventDefault();
-        setActiveFile(files[fileFocusIndex].id);
-        if (window.innerWidth < 768) setSidebarVisible(false);
-        return;
-      default:
-        return;
+    if (createMode === 'file') {
+      addFile(trimmed);
+    } else {
+      addFolder(trimmed);
     }
 
-    event.preventDefault();
-    setFileFocusIndex(nextIndex);
-    fileRefs.current[nextIndex]?.focus();
+    setCreateValue('');
+    setCreateMode(null);
   };
 
-  const handleCreate = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newFileName) {
-      const ext = newFileName.split('.').pop();
-      let lang = 'plaintext';
-      if (ext === 'ts' || ext === 'tsx') lang = 'typescript';
-      if (ext === 'js' || ext === 'jsx') lang = 'javascript';
-      if (ext === 'css') lang = 'css';
-      if (ext === 'html') lang = 'html';
-      if (ext === 'json') lang = 'json';
+  const startFileRename = (fileId: string, path: string) => {
+    setEditing({
+      type: 'file',
+      id: fileId,
+      parentPath: getParentFolderPath(path),
+      value: getFileNameFromPath(path),
+    });
+  };
 
-      addFile(newFileName, lang);
-      setNewFileName('');
-      setIsCreating(false);
+  const startFolderRename = (path: string) => {
+    setEditing({
+      type: 'folder',
+      id: path,
+      parentPath: getParentFolderPath(path),
+      value: getFileNameFromPath(path),
+    });
+  };
+
+  const handleRenameSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editing) {
+      return;
     }
+
+    const cleanName = editing.value.trim().replace(/[\\/]+/g, '');
+    if (!cleanName) {
+      setEditing(null);
+      return;
+    }
+
+    const nextPath = editing.parentPath ? `${editing.parentPath}/${cleanName}` : cleanName;
+    if (editing.type === 'file') {
+      renameFile(editing.id, nextPath);
+    } else {
+      renameFolder(editing.id, nextPath);
+    }
+
+    setEditing(null);
+  };
+
+  const renderFile = (file: ReturnType<typeof useFileStore.getState>['files'][number], depth: number) => {
+    const isEditing = editing?.type === 'file' && editing.id === file.id;
+    const rowPaddingLeft = 10 + depth * 14;
+
+    return (
+      <div key={file.id}>
+        <div
+          className={clsx(
+            'group flex items-center gap-2 py-1.5 pr-2 text-sm cursor-pointer transition-colors duration-150',
+            activeFileId === file.id
+              ? 'bg-vscode-hover text-white'
+              : 'text-vscode-text hover:bg-vscode-hover/50 hover:text-white'
+          )}
+          style={{ paddingLeft: rowPaddingLeft }}
+          onClick={() => openFile(file.id)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              openFile(file.id);
+            }
+          }}
+          title={file.path}
+        >
+          <FileCode size={14} className="opacity-70 shrink-0" />
+          {isEditing ? (
+            <form className="flex-1 min-w-0" onSubmit={handleRenameSubmit}>
+              <input
+                autoFocus
+                value={editing.value}
+                onBlur={handleRenameSubmit}
+                onChange={(event) =>
+                  setEditing((state) => (state && state.id === file.id ? { ...state, value: event.target.value } : state))
+                }
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    setEditing(null);
+                  }
+                }}
+                className="w-full bg-vscode-input text-white text-sm px-2 py-1 border border-vscode-statusBar focus:outline-none rounded"
+              />
+            </form>
+          ) : (
+            <>
+              <span className="truncate flex-1">{file.name}</span>
+              {isFileDirty(file) && <span className="text-yellow-400 text-[10px] leading-none">●</span>}
+            </>
+          )}
+          {!isEditing && (
+            <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+              <button
+                className="hover:text-white p-1"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  startFileRename(file.id, file.path);
+                }}
+                title="Rename"
+              >
+                <Pencil size={12} />
+              </button>
+              <button
+                className="hover:text-red-400 p-1"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  deleteFile(file.id);
+                }}
+                title="Delete"
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderFolder = (folder: ExplorerFolderNode, depth: number) => {
+    const isCollapsed = collapsedFolders[folder.path] ?? false;
+    const isEditing = editing?.type === 'folder' && editing.id === folder.path;
+    const rowPaddingLeft = 8 + depth * 14;
+
+    return (
+      <div key={folder.path}>
+        <div
+          className="group flex items-center gap-1.5 py-1.5 pr-2 text-sm text-vscode-text hover:bg-vscode-hover/40 hover:text-white transition-colors duration-150"
+          style={{ paddingLeft: rowPaddingLeft }}
+          title={folder.path}
+        >
+          <button
+            className="p-0.5 rounded hover:bg-white/10"
+            onClick={() => toggleFolder(folder.path)}
+            aria-label={isCollapsed ? 'Expand folder' : 'Collapse folder'}
+          >
+            {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+          </button>
+          <Folder size={14} className="text-blue-300 shrink-0" />
+          {isEditing ? (
+            <form className="flex-1 min-w-0" onSubmit={handleRenameSubmit}>
+              <input
+                autoFocus
+                value={editing.value}
+                onBlur={handleRenameSubmit}
+                onChange={(event) =>
+                  setEditing((state) =>
+                    state && state.id === folder.path ? { ...state, value: event.target.value } : state
+                  )
+                }
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    setEditing(null);
+                  }
+                }}
+                className="w-full bg-vscode-input text-white text-sm px-2 py-1 border border-vscode-statusBar focus:outline-none rounded"
+              />
+            </form>
+          ) : (
+            <span
+              className="truncate flex-1 cursor-pointer"
+              onClick={() => toggleFolder(folder.path)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  toggleFolder(folder.path);
+                }
+              }}
+            >
+              {folder.name}
+            </span>
+          )}
+          {!isEditing && (
+            <button
+              className="opacity-0 group-hover:opacity-100 hover:text-white p-1 transition-opacity duration-150"
+              onClick={(event) => {
+                event.stopPropagation();
+                startFolderRename(folder.path);
+              }}
+              title="Rename folder"
+            >
+              <Pencil size={12} />
+            </button>
+          )}
+        </div>
+
+        {!isCollapsed && (
+          <>
+            {folder.folders.map((childFolder) => renderFolder(childFolder, depth + 1))}
+            {folder.files.map((file) => renderFile(file, depth + 1))}
+          </>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -88,66 +364,56 @@ const Explorer: React.FC = () => {
       <div className="panel-header">
         <span className="panel-title">Explorer</span>
         <div className="panel-actions">
-          <button onClick={() => setIsCreating(true)} className="hover:text-white transition-colors duration-150 p-1 hover:bg-white/10 rounded">
+          <button
+            onClick={() => {
+              setCreateMode('file');
+              setCreateValue('');
+            }}
+            className="hover:text-white transition-colors duration-150 p-1 hover:bg-white/10 rounded"
+            title="New File"
+          >
             <FilePlus size={16} />
           </button>
-          <button onClick={() => setSidebarVisible(false)} className="md:hidden hover:text-white transition-colors duration-150 p-1 hover:bg-white/10 rounded">
+          <button
+            onClick={() => {
+              setCreateMode('folder');
+              setCreateValue('');
+            }}
+            className="hover:text-white transition-colors duration-150 p-1 hover:bg-white/10 rounded"
+            title="New Folder"
+          >
+            <FolderPlus size={16} />
+          </button>
+          <button
+            onClick={() => setSidebarVisible(false)}
+            className="md:hidden hover:text-white transition-colors duration-150 p-1 hover:bg-white/10 rounded"
+            title="Close"
+          >
             <X size={16} />
           </button>
         </div>
       </div>
 
-      <div
-        className="flex-1 overflow-y-auto py-1"
-        role="listbox"
-        aria-label="Explorer files"
-        onKeyDown={handleFileKeyDown}
-      >
-        {isCreating && (
+      <div className="flex-1 overflow-y-auto py-1">
+        {createMode && (
           <form onSubmit={handleCreate} className="px-2 py-1">
             <input
               autoFocus
               type="text"
               className="w-full bg-vscode-input text-white text-sm px-2 py-1 border border-vscode-statusBar focus:outline-none rounded"
-              placeholder="filename.ts"
-              value={newFileName}
-              onChange={(e) => setNewFileName(e.target.value)}
-              onBlur={() => setIsCreating(false)}
+              placeholder={createMode === 'file' ? 'src/new-file.ts' : 'src/new-folder'}
+              value={createValue}
+              onChange={(event) => setCreateValue(event.target.value)}
+              onBlur={() => setCreateMode(null)}
             />
           </form>
         )}
 
-        {files.map((file, index) => (
-          <div
-            key={file.id}
-            ref={(el) => {
-              fileRefs.current[index] = el;
-            }}
-            className={clsx(
-              "flex items-center px-4 py-1.5 cursor-pointer text-sm group transition-colors duration-150",
-              activeFileId === file.id ? "bg-vscode-hover text-white" : "text-vscode-text hover:bg-vscode-hover/50 hover:text-white"
-            )}
-            onClick={() => {
-              setActiveFile(file.id);
-              if (window.innerWidth < 768) setSidebarVisible(false);
-            }}
-            role="option"
-            aria-selected={activeFileId === file.id}
-            tabIndex={fileFocusIndex === index ? 0 : -1}
-          >
-            <FileCode size={14} className="mr-2 opacity-70" />
-            <span className="truncate flex-1">{file.name}</span>
-            <button
-              className="opacity-0 group-hover:opacity-100 hover:text-red-400 p-1 transition-opacity duration-150"
-              onClick={(e) => {
-                e.stopPropagation();
-                deleteFile(file.id);
-              }}
-            >
-              <Trash2 size={12} />
-            </button>
-          </div>
-        ))}
+        {tree.folders.map((folder) => renderFolder(folder, 0))}
+        {tree.files.map((file) => renderFile(file, 0))}
+        {tree.folders.length === 0 && tree.files.length === 0 && (
+          <div className="px-4 py-2 text-sm text-gray-500">No files yet. Create a file to get started.</div>
+        )}
       </div>
     </div>
   );

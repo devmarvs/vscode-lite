@@ -7,11 +7,12 @@ import { useShallow } from 'zustand/shallow';
 export const CommandPalette: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const { files, setActiveFile, addFile, toggleTerminal, toggleSidebar, openCodexModal, installedExtensions } = useFileStore(
+  const { files, setActiveFile, addFile, saveActiveFile, toggleTerminal, toggleSidebar, openCodexModal, installedExtensions } = useFileStore(
     useShallow((state) => ({
       files: state.files,
       setActiveFile: state.setActiveFile,
       addFile: state.addFile,
+      saveActiveFile: state.saveActiveFile,
       toggleTerminal: state.toggleTerminal,
       toggleSidebar: state.toggleSidebar,
       openCodexModal: state.openCodexModal,
@@ -37,17 +38,21 @@ export const CommandPalette: React.FC = () => {
 
   if (!open) return null;
 
-  const filteredFiles = files.filter(f => f.name.toLowerCase().includes(query.toLowerCase()));
+  const normalizedQuery = query.toLowerCase();
+  const filteredFiles = files.filter(
+    (file) => file.name.toLowerCase().includes(normalizedQuery) || file.path.toLowerCase().includes(normalizedQuery)
+  );
   
   const commands = [
     ...(codexInstalled ? [{ name: 'Codex: Ask', action: () => openCodexModal() }] : []),
+    { name: 'Save File', action: () => saveActiveFile() },
     { name: 'Toggle Terminal', action: () => toggleTerminal() },
     { name: 'Toggle Sidebar', action: () => toggleSidebar() },
     { name: 'New File', action: () => {
-       const name = prompt('File name?');
-       if (name) addFile(name, 'typescript');
+       const path = prompt('File path? (e.g. src/new-file.ts)');
+       if (path) addFile(path);
     }},
-  ].filter(c => c.name.toLowerCase().includes(query.toLowerCase()));
+  ].filter(c => c.name.toLowerCase().includes(normalizedQuery));
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh] bg-black/50" onClick={() => setOpen(false)}>
@@ -72,7 +77,7 @@ export const CommandPalette: React.FC = () => {
                 setOpen(false);
               }}
             >
-              <span>{file.name}</span>
+              <span className="truncate">{file.path}</span>
               <span className="text-gray-500 text-xs group-hover:text-gray-300">File</span>
             </div>
           ))}

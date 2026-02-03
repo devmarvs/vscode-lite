@@ -17,6 +17,12 @@ type ResponseInputItem = {
   content: Array<{ type: 'input_text' | 'output_text'; text: string }>;
 };
 
+type AssistantResponseItem = {
+  type?: string;
+  role?: string;
+  content?: Array<{ type?: string; text?: string }>;
+};
+
 const buildInputItems = (messages: CodexMessage[]): ResponseInputItem[] =>
   messages.map((message) => ({
     type: 'message',
@@ -131,8 +137,8 @@ export const CodexConversation: React.FC<CodexConversationProps> = ({ autoFocus 
         ? (data as { output: unknown[] }).output
         : [];
       const outputText = (data as { output_text?: string }).output_text;
-      const assistantText = outputItems
-        .flatMap((item: { type?: string; role?: string; content?: Array<{ type?: string; text?: string }> }) => {
+      const assistantText = (outputItems as AssistantResponseItem[])
+        .flatMap((item) => {
           if (item?.type !== 'message' || item?.role !== 'assistant' || !Array.isArray(item.content)) {
             return [];
           }

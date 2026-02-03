@@ -16,7 +16,11 @@ export const Search: React.FC = () => {
   const resultRefs = useRef<Array<HTMLDivElement | null>>([]);
 
   const results = query 
-    ? files.filter(f => f.content.toLowerCase().includes(query.toLowerCase()) || f.name.toLowerCase().includes(query.toLowerCase()))
+    ? files.filter(
+        (file) =>
+          file.content.toLowerCase().includes(query.toLowerCase())
+          || file.path.toLowerCase().includes(query.toLowerCase())
+      )
     : [];
   const effectiveFocusIndex = results.length === 0 ? 0 : Math.min(resultFocusIndex, results.length - 1);
 
@@ -98,7 +102,7 @@ export const Search: React.FC = () => {
           <div key={file.id} className="flex flex-col mb-2">
              <div className="px-4 py-1 bg-[#37373d] flex items-center text-sm font-bold text-gray-300">
                 <ArrowRight size={12} className="mr-1" />
-                {file.name}
+                {file.path}
              </div>
              <div 
                ref={(el) => {

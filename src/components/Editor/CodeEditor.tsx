@@ -75,7 +75,7 @@ export const CodeEditor: React.FC = () => {
       <Editor
         height="100%"
         theme="vs-dark"
-        path={activeFile.name} // Helps Monaco determine language for some ext
+        path={activeFile.path} // Helps Monaco determine language for some ext
         defaultLanguage={activeFile.language}
         language={activeFile.language}
         value={activeFile.content}
