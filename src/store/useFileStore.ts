@@ -24,6 +24,44 @@ export interface File {
 
 export const isFileDirty = (file: File) => file.content !== file.savedContent;
 
+export interface CodexFileEdit {
+  path: string;
+  content: string;
+}
+
+export type GitChangeType = 'added' | 'modified' | 'deleted';
+
+export interface GitChange {
+  path: string;
+  type: GitChangeType;
+  staged: boolean;
+}
+
+export interface GitCommit {
+  id: string;
+  branch: string;
+  message: string;
+  timestamp: number;
+  changes: Array<{ path: string; type: GitChangeType }>;
+}
+
+export interface NativeGitSummary {
+  branch: string;
+  staged: number;
+  unstaged: number;
+}
+
+interface GitBranchState {
+  tree: Record<string, string>;
+  commits: GitCommit[];
+}
+
+interface PersistedGitState {
+  currentBranch: string;
+  branches: Record<string, GitBranchState>;
+  stagedPaths: string[];
+}
+
 export const normalizeWorkspacePath = (rawPath: string) =>
   rawPath
     .replace(/\\/g, '/')
@@ -160,6 +198,68 @@ const createFile = (id: string, path: string, language: string, content: string,
   };
 };
 
+const createTreeFromFiles = (files: File[], useSavedContent = false) =>
+  files.reduce<Record<string, string>>((tree, file) => {
+    tree[file.path] = useSavedContent ? file.savedContent : file.content;
+    return tree;
+  }, {});
+
+const createFilesFromTree = (tree: Record<string, string>) =>
+  sortPaths(Object.keys(tree)).map((path) =>
+    createFile(crypto.randomUUID(), path, inferLanguageFromPath(path), tree[path], tree[path])
+  );
+
+const resolveGitChangeType = (baseContent: string | undefined, workingContent: string | undefined): GitChangeType | null => {
+  if (baseContent === undefined && workingContent !== undefined) {
+    return 'added';
+  }
+  if (baseContent !== undefined && workingContent === undefined) {
+    return 'deleted';
+  }
+  if (baseContent !== undefined && workingContent !== undefined && baseContent !== workingContent) {
+    return 'modified';
+  }
+  return null;
+};
+
+export const getGitChanges = (
+  files: File[],
+  headTree: Record<string, string>,
+  stagedPaths: string[] = []
+): GitChange[] => {
+  const workingTree = createTreeFromFiles(files);
+  const stagedSet = new Set(stagedPaths.map((path) => normalizeWorkspacePath(path)).filter(Boolean));
+  const allPaths = sortPaths(Array.from(new Set([...Object.keys(headTree), ...Object.keys(workingTree)])));
+
+  return allPaths
+    .map((path) => {
+      const type = resolveGitChangeType(headTree[path], workingTree[path]);
+      if (!type) {
+        return null;
+      }
+
+      return {
+        path,
+        type,
+        staged: stagedSet.has(path),
+      } satisfies GitChange;
+    })
+    .filter((change): change is GitChange => Boolean(change));
+};
+
+const sanitizeBranchName = (value: string) => {
+  const trimmed = value.trim().replace(/\s+/g, '-');
+  if (!trimmed) {
+    return '';
+  }
+
+  if (!/^[A-Za-z0-9._/-]+$/.test(trimmed)) {
+    return '';
+  }
+
+  return normalizeWorkspacePath(trimmed);
+};
+
 export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   fontSize: 14,
   wordWrap: true,
@@ -188,6 +288,7 @@ const FILES_STORAGE_KEY = 'lite_vscode_files';
 const FOLDERS_STORAGE_KEY = 'lite_vscode_folders';
 const ACTIVE_FILE_STORAGE_KEY = 'lite_vscode_active_file';
 const TERMINAL_OPEN_STORAGE_KEY = 'lite_vscode_terminal_open';
+const GIT_STATE_STORAGE_KEY = 'lite_vscode_git_state';
 
 const normalizeEditorSettings = (settings: Partial<EditorSettings>): EditorSettings => {
   const fontSizeRaw = typeof settings.fontSize === 'number' ? settings.fontSize : DEFAULT_EDITOR_SETTINGS.fontSize;
@@ -492,6 +593,160 @@ const persistFolders = (folders: string[]) => {
   }
 };
 
+const createDefaultGitState = (files: File[]): PersistedGitState => ({
+  currentBranch: 'main',
+  branches: {
+    main: {
+      tree: createTreeFromFiles(files, true),
+      commits: [],
+    },
+  },
+  stagedPaths: [],
+});
+
+const normalizeStoredGitBranch = (branchName: string, value: unknown): GitBranchState | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const candidate = value as Partial<GitBranchState>;
+  if (!candidate.tree || typeof candidate.tree !== 'object') {
+    return null;
+  }
+
+  const tree = Object.entries(candidate.tree as Record<string, unknown>).reduce<Record<string, string>>(
+    (acc, [path, content]) => {
+      const normalizedPath = normalizeWorkspacePath(path);
+      if (!normalizedPath || typeof content !== 'string') {
+        return acc;
+      }
+      acc[normalizedPath] = content;
+      return acc;
+    },
+    {}
+  );
+
+  const commits = Array.isArray(candidate.commits)
+    ? candidate.commits
+        .map((entry) => {
+          if (!entry || typeof entry !== 'object') {
+            return null;
+          }
+
+          const commit = entry as Partial<GitCommit>;
+          if (
+            typeof commit.id !== 'string'
+            || typeof commit.message !== 'string'
+            || typeof commit.timestamp !== 'number'
+            || !Array.isArray(commit.changes)
+          ) {
+            return null;
+          }
+
+          const changes = commit.changes
+            .map((change) => {
+              if (!change || typeof change !== 'object') {
+                return null;
+              }
+
+              const next = change as Partial<{ path: string; type: GitChangeType }>;
+              if (
+                typeof next.path !== 'string'
+                || (next.type !== 'added' && next.type !== 'modified' && next.type !== 'deleted')
+              ) {
+                return null;
+              }
+
+              const normalizedPath = normalizeWorkspacePath(next.path);
+              if (!normalizedPath) {
+                return null;
+              }
+
+              return { path: normalizedPath, type: next.type };
+            })
+            .filter((change): change is { path: string; type: GitChangeType } => Boolean(change));
+
+          return {
+            id: commit.id,
+            branch: typeof commit.branch === 'string' ? commit.branch : branchName,
+            message: commit.message,
+            timestamp: commit.timestamp,
+            changes,
+          } satisfies GitCommit;
+        })
+        .filter((entry): entry is GitCommit => Boolean(entry))
+    : [];
+
+  return { tree, commits };
+};
+
+const loadGitState = (files: File[]): PersistedGitState => {
+  const fallback = createDefaultGitState(files);
+  if (typeof window === 'undefined') {
+    return fallback;
+  }
+
+  try {
+    const stored = window.localStorage.getItem(GIT_STATE_STORAGE_KEY);
+    if (!stored) {
+      return fallback;
+    }
+
+    const parsed = JSON.parse(stored) as Partial<PersistedGitState>;
+    if (!parsed || typeof parsed !== 'object' || typeof parsed.currentBranch !== 'string' || !parsed.branches) {
+      return fallback;
+    }
+
+    const branches = Object.entries(parsed.branches).reduce<Record<string, GitBranchState>>((acc, [name, value]) => {
+      const branchName = sanitizeBranchName(name);
+      if (!branchName) {
+        return acc;
+      }
+
+      const normalized = normalizeStoredGitBranch(branchName, value);
+      if (!normalized) {
+        return acc;
+      }
+
+      acc[branchName] = normalized;
+      return acc;
+    }, {});
+
+    if (!Object.keys(branches).length) {
+      return fallback;
+    }
+
+    const currentBranch = sanitizeBranchName(parsed.currentBranch);
+    const resolvedCurrentBranch = currentBranch && branches[currentBranch] ? currentBranch : Object.keys(branches)[0];
+    const stagedPaths = Array.isArray(parsed.stagedPaths)
+      ? parsed.stagedPaths
+          .filter((path): path is string => typeof path === 'string')
+          .map((path) => normalizeWorkspacePath(path))
+          .filter(Boolean)
+      : [];
+
+    return {
+      currentBranch: resolvedCurrentBranch,
+      branches,
+      stagedPaths: sortPaths(Array.from(new Set(stagedPaths))),
+    };
+  } catch {
+    return fallback;
+  }
+};
+
+const persistGitState = (state: PersistedGitState) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(GIT_STATE_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // Ignore storage failures.
+  }
+};
+
 const loadActiveFileId = (files: File[]): string | null => {
   if (typeof window === 'undefined') {
     return files[0]?.id ?? null;
@@ -607,6 +862,11 @@ interface FileStore {
   files: File[];
   folders: string[];
   activeFileId: string | null;
+  activeSelection: string;
+  gitBranches: Record<string, GitBranchState>;
+  gitCurrentBranch: string;
+  gitStagedPaths: string[];
+  nativeGitSummary: NativeGitSummary | null;
   sidebarVisible: boolean;
   terminalOpen: boolean;
   activeActivityBarItem: ActivityBarItem;
@@ -626,11 +886,21 @@ interface FileStore {
   addFolder: (path: string) => void;
   renameFile: (id: string, path: string) => void;
   renameFolder: (fromPath: string, toPath: string) => void;
+  applyFileEdit: (edit: CodexFileEdit) => void;
+  stageGitPath: (path: string) => void;
+  unstageGitPath: (path: string) => void;
+  stageAllGitChanges: () => void;
+  unstageAllGitChanges: () => void;
+  commitGitChanges: (message: string) => { ok: boolean; error?: string };
+  createGitBranch: (name: string) => { ok: boolean; error?: string };
+  switchGitBranch: (name: string) => { ok: boolean; error?: string };
+  setNativeGitSummary: (summary: NativeGitSummary | null) => void;
   saveFile: (id: string) => void;
   saveActiveFile: () => void;
   deleteFile: (id: string) => void;
   updateFileContent: (id: string, content: string) => void;
   setActiveFile: (id: string) => void;
+  setActiveSelection: (selection: string) => void;
   toggleSidebar: () => void;
   setSidebarVisible: (visible: boolean) => void;
   toggleTerminal: () => void;
@@ -655,11 +925,17 @@ interface FileStore {
 const initialFilesState = loadFiles();
 const initialFoldersState = loadFolders(initialFilesState);
 const initialActiveFileId = loadActiveFileId(initialFilesState);
+const initialGitState = loadGitState(initialFilesState);
 
 export const useFileStore = create<FileStore>((set, get) => ({
   files: initialFilesState,
   folders: initialFoldersState,
   activeFileId: initialActiveFileId,
+  activeSelection: '',
+  gitBranches: initialGitState.branches,
+  gitCurrentBranch: initialGitState.currentBranch,
+  gitStagedPaths: initialGitState.stagedPaths,
+  nativeGitSummary: null,
   sidebarVisible: true,
   terminalOpen: loadTerminalOpen(),
   activeActivityBarItem: 'explorer',
@@ -795,6 +1071,244 @@ export const useFileStore = create<FileStore>((set, get) => ({
       return { files: nextFiles, folders: nextFolders };
     }),
 
+  applyFileEdit: (edit) =>
+    set((state) => {
+      const normalizedPath = normalizeWorkspacePath(edit.path);
+      if (!normalizedPath) {
+        return {};
+      }
+
+      const existing = state.files.find((file) => file.path === normalizedPath);
+      const nextFiles = existing
+        ? state.files.map((file) =>
+            file.id === existing.id ? { ...file, content: edit.content } : file
+          )
+        : [
+            ...state.files,
+            createFile(
+              crypto.randomUUID(),
+              normalizedPath,
+              inferLanguageFromPath(normalizedPath),
+              edit.content,
+              edit.content
+            ),
+          ];
+      const nextActiveId = existing?.id ?? nextFiles[nextFiles.length - 1]?.id ?? state.activeFileId;
+      const nextFolders = mergeFolderPaths(state.folders, collectAncestorFolders(normalizedPath));
+
+      persistFiles(nextFiles);
+      persistFolders(nextFolders);
+      persistActiveFileId(nextActiveId);
+      return { files: nextFiles, folders: nextFolders, activeFileId: nextActiveId };
+    }),
+
+  stageGitPath: (path) =>
+    set((state) => {
+      const normalizedPath = normalizeWorkspacePath(path);
+      if (!normalizedPath) {
+        return {};
+      }
+
+      const currentBranch = state.gitBranches[state.gitCurrentBranch];
+      const changes = getGitChanges(state.files, currentBranch?.tree ?? {}, state.gitStagedPaths);
+      if (!changes.some((change) => change.path === normalizedPath)) {
+        return {};
+      }
+
+      const nextStagedPaths = sortPaths(Array.from(new Set([...state.gitStagedPaths, normalizedPath])));
+      persistGitState({
+        currentBranch: state.gitCurrentBranch,
+        branches: state.gitBranches,
+        stagedPaths: nextStagedPaths,
+      });
+      return { gitStagedPaths: nextStagedPaths };
+    }),
+
+  unstageGitPath: (path) =>
+    set((state) => {
+      const normalizedPath = normalizeWorkspacePath(path);
+      if (!normalizedPath || !state.gitStagedPaths.includes(normalizedPath)) {
+        return {};
+      }
+
+      const nextStagedPaths = state.gitStagedPaths.filter((entry) => entry !== normalizedPath);
+      persistGitState({
+        currentBranch: state.gitCurrentBranch,
+        branches: state.gitBranches,
+        stagedPaths: nextStagedPaths,
+      });
+      return { gitStagedPaths: nextStagedPaths };
+    }),
+
+  stageAllGitChanges: () =>
+    set((state) => {
+      const currentBranch = state.gitBranches[state.gitCurrentBranch];
+      const allChangedPaths = getGitChanges(state.files, currentBranch?.tree ?? {}).map((change) => change.path);
+      const nextStagedPaths = sortPaths(Array.from(new Set(allChangedPaths)));
+      persistGitState({
+        currentBranch: state.gitCurrentBranch,
+        branches: state.gitBranches,
+        stagedPaths: nextStagedPaths,
+      });
+      return { gitStagedPaths: nextStagedPaths };
+    }),
+
+  unstageAllGitChanges: () =>
+    set((state) => {
+      if (state.gitStagedPaths.length === 0) {
+        return {};
+      }
+
+      persistGitState({
+        currentBranch: state.gitCurrentBranch,
+        branches: state.gitBranches,
+        stagedPaths: [],
+      });
+      return { gitStagedPaths: [] };
+    }),
+
+  commitGitChanges: (message) => {
+    const trimmedMessage = message.trim();
+    if (!trimmedMessage) {
+      return { ok: false, error: 'Commit message is required.' };
+    }
+
+    const state = get();
+    const currentBranchState = state.gitBranches[state.gitCurrentBranch];
+    if (!currentBranchState) {
+      return { ok: false, error: 'Current branch is unavailable.' };
+    }
+
+    const stagedChanges = getGitChanges(state.files, currentBranchState.tree, state.gitStagedPaths)
+      .filter((change) => change.staged);
+    if (stagedChanges.length === 0) {
+      return { ok: false, error: 'Stage at least one change before committing.' };
+    }
+
+    const workingTree = createTreeFromFiles(state.files);
+    const nextTree = { ...currentBranchState.tree };
+    stagedChanges.forEach((change) => {
+      if (change.type === 'deleted') {
+        delete nextTree[change.path];
+        return;
+      }
+
+      const content = workingTree[change.path];
+      if (typeof content === 'string') {
+        nextTree[change.path] = content;
+      }
+    });
+
+    const commit: GitCommit = {
+      id: crypto.randomUUID(),
+      branch: state.gitCurrentBranch,
+      message: trimmedMessage,
+      timestamp: Date.now(),
+      changes: stagedChanges.map((change) => ({ path: change.path, type: change.type })),
+    };
+
+    const nextBranches: Record<string, GitBranchState> = {
+      ...state.gitBranches,
+      [state.gitCurrentBranch]: {
+        tree: nextTree,
+        commits: [...currentBranchState.commits, commit],
+      },
+    };
+
+    set({
+      gitBranches: nextBranches,
+      gitStagedPaths: [],
+    });
+
+    persistGitState({
+      currentBranch: state.gitCurrentBranch,
+      branches: nextBranches,
+      stagedPaths: [],
+    });
+
+    return { ok: true };
+  },
+
+  createGitBranch: (name) => {
+    const normalizedName = sanitizeBranchName(name);
+    if (!normalizedName) {
+      return { ok: false, error: 'Branch name can only contain letters, numbers, ., _, -, and /.' };
+    }
+
+    const state = get();
+    if (state.gitBranches[normalizedName]) {
+      return { ok: false, error: `Branch "${normalizedName}" already exists.` };
+    }
+
+    const sourceBranch = state.gitBranches[state.gitCurrentBranch];
+    if (!sourceBranch) {
+      return { ok: false, error: 'Current branch is unavailable.' };
+    }
+
+    const nextBranches: Record<string, GitBranchState> = {
+      ...state.gitBranches,
+      [normalizedName]: {
+        tree: { ...sourceBranch.tree },
+        commits: [...sourceBranch.commits],
+      },
+    };
+
+    set({ gitBranches: nextBranches });
+    persistGitState({
+      currentBranch: state.gitCurrentBranch,
+      branches: nextBranches,
+      stagedPaths: state.gitStagedPaths,
+    });
+    return { ok: true };
+  },
+
+  switchGitBranch: (name) => {
+    const normalizedName = sanitizeBranchName(name);
+    if (!normalizedName) {
+      return { ok: false, error: 'Branch name is invalid.' };
+    }
+
+    const state = get();
+    const targetBranch = state.gitBranches[normalizedName];
+    if (!targetBranch) {
+      return { ok: false, error: `Branch "${normalizedName}" does not exist.` };
+    }
+
+    if (normalizedName === state.gitCurrentBranch) {
+      return { ok: true };
+    }
+
+    const currentBranch = state.gitBranches[state.gitCurrentBranch];
+    const pendingChanges = getGitChanges(state.files, currentBranch?.tree ?? {}, state.gitStagedPaths);
+    if (pendingChanges.length > 0) {
+      return { ok: false, error: 'Commit or unstage changes before switching branches.' };
+    }
+
+    const nextFiles = createFilesFromTree(targetBranch.tree);
+    const nextFolders = inferFolderPathsFromFiles(nextFiles);
+    const nextActiveFileId = nextFiles[0]?.id ?? null;
+
+    set({
+      files: nextFiles,
+      folders: nextFolders,
+      activeFileId: nextActiveFileId,
+      gitCurrentBranch: normalizedName,
+      gitStagedPaths: [],
+      activeSelection: '',
+    });
+
+    persistFiles(nextFiles);
+    persistFolders(nextFolders);
+    persistActiveFileId(nextActiveFileId);
+    persistGitState({
+      currentBranch: normalizedName,
+      branches: state.gitBranches,
+      stagedPaths: [],
+    });
+
+    return { ok: true };
+  },
+
   saveFile: (id) =>
     set((state) => {
       let changed = false;
@@ -849,8 +1363,12 @@ export const useFileStore = create<FileStore>((set, get) => ({
       }
 
       persistActiveFileId(id);
-      return { activeFileId: id };
+      return { activeFileId: id, activeSelection: '' };
     }),
+
+  setActiveSelection: (selection) => set({ activeSelection: selection }),
+
+  setNativeGitSummary: (summary) => set({ nativeGitSummary: summary }),
 
   toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
 

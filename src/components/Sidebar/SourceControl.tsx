@@ -1,51 +1,512 @@
-import React from 'react';
-import { GitCommit, RefreshCw, Check, Plus, MoreHorizontal, X } from 'lucide-react';
-import { useFileStore } from '../../store/useFileStore';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Check, GitBranch, GitCommit, Minus, Plus, RefreshCw, X } from 'lucide-react';
+import { getGitChanges, useFileStore, type GitChange } from '../../store/useFileStore';
+import {
+  canUseNativeGit,
+  commitNativeGitChanges,
+  createNativeGitBranch,
+  fetchNativeGitStatus,
+  stageAllNativeGitChanges,
+  stageNativeGitPath,
+  switchNativeGitBranch,
+  unstageAllNativeGitChanges,
+  unstageNativeGitPath,
+  type NativeGitStatus,
+} from '../../utils/nativeGit';
 import { useShallow } from 'zustand/shallow';
 
+const STATUS_BADGE: Record<GitChange['type'], { label: string; className: string }> = {
+  added: { label: 'A', className: 'text-green-400' },
+  modified: { label: 'M', className: 'text-yellow-400' },
+  deleted: { label: 'D', className: 'text-red-400' },
+};
+
+const NATIVE_GIT_REPO_PATH_STORAGE_KEY = 'lite_vscode_native_git_repo_path';
+
+const getErrorMessage = (error: unknown) => {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return 'Git operation failed.';
+};
+
 export const SourceControl: React.FC = () => {
-  const { setSidebarVisible } = useFileStore(
+  const {
+    files,
+    setActiveFile,
+    setSidebarVisible,
+    gitBranches,
+    gitCurrentBranch,
+    gitStagedPaths,
+    stageGitPath,
+    unstageGitPath,
+    stageAllGitChanges,
+    unstageAllGitChanges,
+    commitGitChanges,
+    createGitBranch,
+    switchGitBranch,
+    setNativeGitSummary,
+  } = useFileStore(
     useShallow((state) => ({
+      files: state.files,
+      setActiveFile: state.setActiveFile,
       setSidebarVisible: state.setSidebarVisible,
+      gitBranches: state.gitBranches,
+      gitCurrentBranch: state.gitCurrentBranch,
+      gitStagedPaths: state.gitStagedPaths,
+      stageGitPath: state.stageGitPath,
+      unstageGitPath: state.unstageGitPath,
+      stageAllGitChanges: state.stageAllGitChanges,
+      unstageAllGitChanges: state.unstageAllGitChanges,
+      commitGitChanges: state.commitGitChanges,
+      createGitBranch: state.createGitBranch,
+      switchGitBranch: state.switchGitBranch,
+      setNativeGitSummary: state.setNativeGitSummary,
     }))
   );
+
+  const [commitMessage, setCommitMessage] = useState('');
+  const [branchDraft, setBranchDraft] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [nativeAvailable, setNativeAvailable] = useState(false);
+  const [nativeBusy, setNativeBusy] = useState(false);
+  const [nativeStatus, setNativeStatus] = useState<NativeGitStatus | null>(null);
+  const [nativeRepoPath, setNativeRepoPath] = useState(() => {
+    if (typeof window === 'undefined') {
+      return '';
+    }
+    try {
+      return window.localStorage.getItem(NATIVE_GIT_REPO_PATH_STORAGE_KEY) ?? '';
+    } catch {
+      return '';
+    }
+  });
+
+  const currentBranchState = gitBranches[gitCurrentBranch];
+  const inMemoryChanges = useMemo(
+    () => getGitChanges(files, currentBranchState?.tree ?? {}, gitStagedPaths),
+    [files, currentBranchState?.tree, gitStagedPaths]
+  );
+  const inMemoryStagedChanges = inMemoryChanges.filter((change) => change.staged);
+  const inMemoryUnstagedChanges = inMemoryChanges.filter((change) => !change.staged);
+  const inMemoryBranchNames = useMemo(
+    () => Object.keys(gitBranches).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
+    [gitBranches]
+  );
+  const inMemoryLatestCommit = currentBranchState?.commits[currentBranchState.commits.length - 1];
+
+  const trimmedNativeRepoPath = nativeRepoPath.trim();
+  const usingNativeBackend = nativeAvailable && Boolean(trimmedNativeRepoPath);
+
+  const refreshNativeStatus = useCallback(async () => {
+    if (!usingNativeBackend) {
+      setNativeStatus(null);
+      return;
+    }
+
+    setNativeBusy(true);
+    try {
+      const status = await fetchNativeGitStatus(trimmedNativeRepoPath);
+      setNativeStatus(status);
+      setError(null);
+    } catch (nativeError) {
+      setNativeStatus(null);
+      setError(getErrorMessage(nativeError));
+    } finally {
+      setNativeBusy(false);
+    }
+  }, [trimmedNativeRepoPath, usingNativeBackend]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const resolveAvailability = async () => {
+      const available = await canUseNativeGit();
+      if (!cancelled) {
+        setNativeAvailable(available);
+      }
+    };
+    resolveAvailability();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      if (nativeRepoPath.trim()) {
+        window.localStorage.setItem(NATIVE_GIT_REPO_PATH_STORAGE_KEY, nativeRepoPath.trim());
+      } else {
+        window.localStorage.removeItem(NATIVE_GIT_REPO_PATH_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [nativeRepoPath]);
+
+  useEffect(() => {
+    if (!usingNativeBackend) {
+      setNativeStatus(null);
+      return;
+    }
+    void refreshNativeStatus();
+  }, [usingNativeBackend, refreshNativeStatus]);
+
+  useEffect(() => {
+    if (usingNativeBackend && nativeStatus) {
+      setNativeGitSummary({
+        branch: nativeStatus.currentBranch,
+        staged: nativeStatus.staged.length,
+        unstaged: nativeStatus.unstaged.length,
+      });
+      return;
+    }
+
+    setNativeGitSummary(null);
+  }, [nativeStatus, setNativeGitSummary, usingNativeBackend]);
+
+  useEffect(() => () => setNativeGitSummary(null), [setNativeGitSummary]);
+
+  const stagedChanges = usingNativeBackend ? (nativeStatus?.staged ?? []) : inMemoryStagedChanges;
+  const unstagedChanges = usingNativeBackend ? (nativeStatus?.unstaged ?? []) : inMemoryUnstagedChanges;
+  const currentBranch = usingNativeBackend ? (nativeStatus?.currentBranch ?? 'main') : gitCurrentBranch;
+  const branchNames = usingNativeBackend ? (nativeStatus?.branches ?? []) : inMemoryBranchNames;
+  const latestCommitMessage = usingNativeBackend ? null : inMemoryLatestCommit?.message;
+
+  const openPath = (path: string) => {
+    const match = files.find((file) => file.path === path);
+    if (match) {
+      setActiveFile(match.id);
+      if (window.innerWidth < 768) {
+        setSidebarVisible(false);
+      }
+    }
+  };
+
+  const handleStageAll = async () => {
+    if (!usingNativeBackend) {
+      stageAllGitChanges();
+      return;
+    }
+
+    setNativeBusy(true);
+    try {
+      await stageAllNativeGitChanges(trimmedNativeRepoPath);
+      await refreshNativeStatus();
+      setError(null);
+    } catch (nativeError) {
+      setError(getErrorMessage(nativeError));
+    } finally {
+      setNativeBusy(false);
+    }
+  };
+
+  const handleUnstageAll = async () => {
+    if (!usingNativeBackend) {
+      unstageAllGitChanges();
+      return;
+    }
+
+    setNativeBusy(true);
+    try {
+      await unstageAllNativeGitChanges(trimmedNativeRepoPath);
+      await refreshNativeStatus();
+      setError(null);
+    } catch (nativeError) {
+      setError(getErrorMessage(nativeError));
+    } finally {
+      setNativeBusy(false);
+    }
+  };
+
+  const handleStagePath = async (path: string) => {
+    if (!usingNativeBackend) {
+      stageGitPath(path);
+      return;
+    }
+
+    setNativeBusy(true);
+    try {
+      await stageNativeGitPath(trimmedNativeRepoPath, path);
+      await refreshNativeStatus();
+      setError(null);
+    } catch (nativeError) {
+      setError(getErrorMessage(nativeError));
+    } finally {
+      setNativeBusy(false);
+    }
+  };
+
+  const handleUnstagePath = async (path: string) => {
+    if (!usingNativeBackend) {
+      unstageGitPath(path);
+      return;
+    }
+
+    setNativeBusy(true);
+    try {
+      await unstageNativeGitPath(trimmedNativeRepoPath, path);
+      await refreshNativeStatus();
+      setError(null);
+    } catch (nativeError) {
+      setError(getErrorMessage(nativeError));
+    } finally {
+      setNativeBusy(false);
+    }
+  };
+
+  const handleCommit = async () => {
+    if (!usingNativeBackend) {
+      const result = commitGitChanges(commitMessage);
+      if (!result.ok) {
+        setError(result.error ?? 'Commit failed.');
+        return;
+      }
+      setCommitMessage('');
+      setError(null);
+      return;
+    }
+
+    setNativeBusy(true);
+    try {
+      await commitNativeGitChanges(trimmedNativeRepoPath, commitMessage);
+      setCommitMessage('');
+      await refreshNativeStatus();
+      setError(null);
+    } catch (nativeError) {
+      setError(getErrorMessage(nativeError));
+    } finally {
+      setNativeBusy(false);
+    }
+  };
+
+  const handleBranchSwitch = async (name: string) => {
+    if (!usingNativeBackend) {
+      const result = switchGitBranch(name);
+      if (!result.ok) {
+        setError(result.error ?? 'Failed to switch branch.');
+        return;
+      }
+      setError(null);
+      return;
+    }
+
+    setNativeBusy(true);
+    try {
+      await switchNativeGitBranch(trimmedNativeRepoPath, name);
+      await refreshNativeStatus();
+      setError(null);
+    } catch (nativeError) {
+      setError(getErrorMessage(nativeError));
+    } finally {
+      setNativeBusy(false);
+    }
+  };
+
+  const handleCreateBranch = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!usingNativeBackend) {
+      const result = createGitBranch(branchDraft);
+      if (!result.ok) {
+        setError(result.error ?? 'Failed to create branch.');
+        return;
+      }
+      setBranchDraft('');
+      setError(null);
+      return;
+    }
+
+    setNativeBusy(true);
+    try {
+      await createNativeGitBranch(trimmedNativeRepoPath, branchDraft);
+      setBranchDraft('');
+      await refreshNativeStatus();
+      setError(null);
+    } catch (nativeError) {
+      setError(getErrorMessage(nativeError));
+    } finally {
+      setNativeBusy(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full text-vscode-text">
       <div className="panel-header">
         <span className="panel-title">Source Control</span>
         <div className="panel-actions">
-           <button onClick={() => setSidebarVisible(false)} className="md:hidden hover:text-white transition-colors duration-150 p-1 hover:bg-white/10 rounded mr-2">
-             <X size={16} />
-           </button>
-           <RefreshCw size={14} className="hover:text-white cursor-pointer" />
-           <Check size={14} className="hover:text-white cursor-pointer" />
-           <MoreHorizontal size={14} className="hover:text-white cursor-pointer" />
+          <button
+            onClick={() => setSidebarVisible(false)}
+            className="md:hidden hover:text-white transition-colors duration-150 p-1 hover:bg-white/10 rounded"
+            title="Close"
+          >
+            <X size={16} />
+          </button>
+          <button
+            onClick={handleStageAll}
+            className="hover:text-white transition-colors duration-150 p-1 hover:bg-white/10 rounded"
+            title="Stage all changes"
+            disabled={nativeBusy}
+          >
+            <Check size={14} />
+          </button>
+          <button
+            onClick={handleUnstageAll}
+            className="hover:text-white transition-colors duration-150 p-1 hover:bg-white/10 rounded"
+            title="Unstage all changes"
+            disabled={nativeBusy}
+          >
+            <RefreshCw size={14} />
+          </button>
         </div>
       </div>
-      
-      <div className="px-4 py-2">
-        <div className="flex gap-2 mb-2">
-           <input 
-              className="flex-1 bg-vscode-input text-white text-sm px-2 py-1 border border-vscode-border focus:outline-none focus:border-vscode-statusBar"
-              placeholder="Message (Ctrl+Enter to commit)"
-           />
+
+      {nativeAvailable && (
+        <div className="px-4 py-3 border-b border-vscode-border/40 space-y-2">
+          <div className="text-[10px] uppercase tracking-wide text-gray-400">Native Git Repository</div>
+          <div className="flex gap-2">
+            <input
+              value={nativeRepoPath}
+              onChange={(event) => setNativeRepoPath(event.target.value)}
+              placeholder="/absolute/path/to/repo"
+              className="flex-1 bg-vscode-input text-white text-xs px-2 py-1 border border-vscode-border focus:outline-none focus:border-vscode-statusBar rounded"
+            />
+            <button
+              type="button"
+              onClick={() => void refreshNativeStatus()}
+              className="px-2 py-1 text-xs rounded border border-vscode-border hover:bg-vscode-hover transition-colors duration-150 disabled:opacity-50"
+              disabled={!trimmedNativeRepoPath || nativeBusy}
+            >
+              Connect
+            </button>
+          </div>
+          <div className="text-[10px] text-gray-500">
+            {usingNativeBackend ? 'Using native git backend.' : 'No repo path configured. Falling back to in-app git.'}
+          </div>
         </div>
-        <button className="w-full bg-vscode-statusBar text-white py-1 px-2 text-sm font-medium hover:bg-opacity-90 flex items-center justify-center gap-2">
-           <GitCommit size={14} /> Commit
+      )}
+
+      <div className="px-4 py-3 border-b border-vscode-border/40 space-y-2">
+        <div className="flex items-center gap-2">
+          <GitBranch size={14} className="text-gray-400" />
+          <select
+            className="flex-1 bg-vscode-input text-white text-xs px-2 py-1 border border-vscode-border focus:outline-none focus:border-vscode-statusBar rounded"
+            value={currentBranch}
+            onChange={(event) => void handleBranchSwitch(event.target.value)}
+            disabled={nativeBusy || branchNames.length === 0}
+          >
+            {branchNames.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <form className="flex gap-2" onSubmit={(event) => void handleCreateBranch(event)}>
+          <input
+            value={branchDraft}
+            onChange={(event) => setBranchDraft(event.target.value)}
+            placeholder="new-branch"
+            className="flex-1 bg-vscode-input text-white text-xs px-2 py-1 border border-vscode-border focus:outline-none focus:border-vscode-statusBar rounded"
+          />
+          <button
+            type="submit"
+            className="px-2 py-1 text-xs rounded border border-vscode-border hover:bg-vscode-hover transition-colors duration-150 disabled:opacity-50"
+            disabled={nativeBusy}
+          >
+            Create
+          </button>
+        </form>
+      </div>
+
+      <div className="px-4 py-3 border-b border-vscode-border/40 space-y-2">
+        <input
+          value={commitMessage}
+          onChange={(event) => setCommitMessage(event.target.value)}
+          onKeyDown={(event) => {
+            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+              event.preventDefault();
+              void handleCommit();
+            }
+          }}
+          className="w-full bg-vscode-input text-white text-sm px-2 py-1 border border-vscode-border focus:outline-none focus:border-vscode-statusBar rounded"
+          placeholder="Message (Ctrl/Cmd+Enter to commit)"
+        />
+        <button
+          onClick={() => void handleCommit()}
+          disabled={nativeBusy || stagedChanges.length === 0}
+          className="w-full bg-vscode-statusBar text-white py-1 px-2 text-sm font-medium hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 rounded"
+        >
+          <GitCommit size={14} /> Commit {stagedChanges.length > 0 ? `(${stagedChanges.length})` : ''}
         </button>
+        {error && <div className="text-[11px] text-red-400">{error}</div>}
+        {latestCommitMessage && (
+          <div className="text-[11px] text-gray-500 truncate">
+            Last: {latestCommitMessage}
+          </div>
+        )}
       </div>
-      
-      <div className="flex-1 overflow-y-auto mt-2">
-         <div className="px-4 py-1 panel-section-title text-blue-400">Changes</div>
-         <div className="px-4 py-1 text-sm hover:bg-vscode-hover cursor-pointer flex items-center group">
-            <span className="text-yellow-500 mr-2">M</span>
-            <span className="text-gray-300 group-hover:text-white">App.tsx</span>
-            <span className="ml-auto text-gray-500 text-xs">src</span>
-            <div className="flex gap-1 ml-2 opacity-0 group-hover:opacity-100">
-               <Plus size={14} />
-               <RefreshCw size={14} />
-            </div>
-         </div>
+
+      <div className="flex-1 overflow-y-auto">
+        <div className="px-4 py-2 panel-section-title text-blue-400">
+          Staged Changes ({stagedChanges.length})
+        </div>
+        {stagedChanges.length === 0 && (
+          <div className="px-4 py-1 text-xs text-gray-500">No staged changes.</div>
+        )}
+        {stagedChanges.map((change) => (
+          <div
+            key={`staged-${change.path}`}
+            className="px-4 py-1 text-sm hover:bg-vscode-hover cursor-pointer flex items-center gap-2 group"
+            onClick={() => openPath(change.path)}
+            title={change.path}
+          >
+            <span className={STATUS_BADGE[change.type].className}>{STATUS_BADGE[change.type].label}</span>
+            <span className="truncate flex-1 text-gray-300 group-hover:text-white">{change.path}</span>
+            <button
+              className="opacity-0 group-hover:opacity-100 p-1 hover:text-white transition-opacity duration-150"
+              onClick={(event) => {
+                event.stopPropagation();
+                void handleUnstagePath(change.path);
+              }}
+              title="Unstage"
+              disabled={nativeBusy}
+            >
+              <Minus size={13} />
+            </button>
+          </div>
+        ))}
+
+        <div className="px-4 py-2 panel-section-title text-blue-400 mt-2">
+          Changes ({unstagedChanges.length})
+        </div>
+        {unstagedChanges.length === 0 && (
+          <div className="px-4 py-1 text-xs text-gray-500">No unstaged changes.</div>
+        )}
+        {unstagedChanges.map((change) => (
+          <div
+            key={`unstaged-${change.path}`}
+            className="px-4 py-1 text-sm hover:bg-vscode-hover cursor-pointer flex items-center gap-2 group"
+            onClick={() => openPath(change.path)}
+            title={change.path}
+          >
+            <span className={STATUS_BADGE[change.type].className}>{STATUS_BADGE[change.type].label}</span>
+            <span className="truncate flex-1 text-gray-300 group-hover:text-white">{change.path}</span>
+            <button
+              className="opacity-0 group-hover:opacity-100 p-1 hover:text-white transition-opacity duration-150"
+              onClick={(event) => {
+                event.stopPropagation();
+                void handleStagePath(change.path);
+              }}
+              title="Stage"
+              disabled={nativeBusy}
+            >
+              <Plus size={13} />
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   );
