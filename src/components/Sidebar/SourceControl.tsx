@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, GitBranch, GitCommit, Minus, Plus, RefreshCw, X } from 'lucide-react';
+import { Check, GitBranch, GitCommit, Minus, Pin, PinOff, Plus, RefreshCw, X } from 'lucide-react';
 import { getGitChanges, useFileStore, type GitChange } from '../../store/useFileStore';
 import {
   canUseNativeGit,
@@ -24,10 +24,12 @@ const STATUS_BADGE: Record<GitChange['type'], { label: string; className: string
 const NATIVE_GIT_REPO_PATH_STORAGE_KEY = 'lite_vscode_native_git_repo_path';
 const NATIVE_GIT_TRUSTED_REPOS_STORAGE_KEY = 'lite_vscode_native_git_trusted_repos';
 const NATIVE_GIT_RECENT_REPOS_STORAGE_KEY = 'lite_vscode_native_git_recent_repos';
+const NATIVE_GIT_PINNED_REPOS_STORAGE_KEY = 'lite_vscode_native_git_pinned_repos';
 const NATIVE_GIT_AUTO_REFRESH_INTERVAL_MS = 15000;
 const NATIVE_GIT_EDITOR_REFRESH_DEBOUNCE_MS = 1500;
 const NATIVE_GIT_MAX_RECENT_REPOS = 8;
 const NATIVE_GIT_MAX_TRUSTED_REPOS = 20;
+const NATIVE_GIT_MAX_PINNED_REPOS = 9;
 
 const normalizeRepoPath = (value: string) => value.trim();
 
@@ -113,6 +115,7 @@ export const SourceControl: React.FC = () => {
   const [nativeAvailable, setNativeAvailable] = useState(false);
   const [nativeBusy, setNativeBusy] = useState(false);
   const [nativeStatus, setNativeStatus] = useState<NativeGitStatus | null>(null);
+  const [pinnedRepos, setPinnedRepos] = useState(() => loadStoredRepoPaths(NATIVE_GIT_PINNED_REPOS_STORAGE_KEY));
   const [trustedRepos, setTrustedRepos] = useState(() => loadStoredRepoPaths(NATIVE_GIT_TRUSTED_REPOS_STORAGE_KEY));
   const [recentRepos, setRecentRepos] = useState(() => loadStoredRepoPaths(NATIVE_GIT_RECENT_REPOS_STORAGE_KEY));
   const [selectedTrustedRepo, setSelectedTrustedRepo] = useState('');
@@ -144,6 +147,16 @@ export const SourceControl: React.FC = () => {
 
   const trimmedNativeRepoPath = nativeRepoPath.trim();
   const usingNativeBackend = nativeAvailable && Boolean(trimmedNativeRepoPath);
+  const isCurrentRepoPinned = pinnedRepos.includes(trimmedNativeRepoPath);
+
+  const quickSwitchRepos = useMemo(
+    () =>
+      dedupeRepoPaths([...pinnedRepos, ...trustedRepos, ...recentRepos]).slice(
+        0,
+        NATIVE_GIT_MAX_PINNED_REPOS
+      ),
+    [pinnedRepos, trustedRepos, recentRepos]
+  );
 
   const addRecentRepo = useCallback((path: string) => {
     const normalizedPath = normalizeRepoPath(path);
@@ -197,6 +210,55 @@ export const SourceControl: React.FC = () => {
 
     setTrustedRepos((previous) => previous.filter((entry) => entry !== normalizedPath));
   }, []);
+
+  const addPinnedRepo = useCallback((path: string) => {
+    const normalizedPath = normalizeRepoPath(path);
+    if (!normalizedPath) {
+      return;
+    }
+
+    setPinnedRepos((previous) => {
+      if (previous[0] === normalizedPath) {
+        return previous;
+      }
+
+      const next = [normalizedPath, ...previous.filter((entry) => entry !== normalizedPath)].slice(
+        0,
+        NATIVE_GIT_MAX_PINNED_REPOS
+      );
+
+      if (next.length === previous.length && next.every((entry, index) => entry === previous[index])) {
+        return previous;
+      }
+
+      return next;
+    });
+  }, []);
+
+  const removePinnedRepo = useCallback((path: string) => {
+    const normalizedPath = normalizeRepoPath(path);
+    if (!normalizedPath) {
+      return;
+    }
+
+    setPinnedRepos((previous) => previous.filter((entry) => entry !== normalizedPath));
+  }, []);
+
+  const switchRepoPath = useCallback(
+    (path: string) => {
+      const normalizedPath = normalizeRepoPath(path);
+      if (!normalizedPath) {
+        return;
+      }
+      setNativeRepoPath(normalizedPath);
+      if (trustedRepos.includes(normalizedPath)) {
+        setSelectedTrustedRepo(normalizedPath);
+      }
+      addRecentRepo(normalizedPath);
+      setError(null);
+    },
+    [addRecentRepo, trustedRepos]
+  );
 
   const refreshNativeStatus = useCallback(async () => {
     if (!usingNativeBackend) {
@@ -252,6 +314,18 @@ export const SourceControl: React.FC = () => {
       // Ignore storage failures.
     }
   }, [nativeRepoPath]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(NATIVE_GIT_PINNED_REPOS_STORAGE_KEY, JSON.stringify(dedupeRepoPaths(pinnedRepos)));
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [pinnedRepos]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -346,6 +420,67 @@ export const SourceControl: React.FC = () => {
 
     return () => window.clearTimeout(timeoutId);
   }, [files, refreshNativeStatus, usingNativeBackend]);
+
+  useEffect(() => {
+    if (!nativeAvailable || quickSwitchRepos.length === 0) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isPrimary = event.metaKey || event.ctrlKey;
+      if (!isPrimary || !event.altKey) {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tagName = target.tagName.toLowerCase();
+        const isEditable =
+          tagName === 'input'
+          || tagName === 'textarea'
+          || tagName === 'select'
+          || target.isContentEditable;
+        if (isEditable) {
+          return;
+        }
+      }
+
+      const digitMatch = event.key.match(/^[1-9]$/);
+      if (digitMatch) {
+        const index = Number(digitMatch[0]) - 1;
+        const nextPath = quickSwitchRepos[index];
+        if (!nextPath) {
+          return;
+        }
+
+        event.preventDefault();
+        switchRepoPath(nextPath);
+        return;
+      }
+
+      if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
+        return;
+      }
+
+      const currentIndex = quickSwitchRepos.findIndex((repoPath) => repoPath === trimmedNativeRepoPath);
+      const startIndex = currentIndex >= 0 ? currentIndex : 0;
+      const nextIndex =
+        event.key === 'ArrowDown'
+          ? (startIndex + 1) % quickSwitchRepos.length
+          : (startIndex - 1 + quickSwitchRepos.length) % quickSwitchRepos.length;
+
+      const nextPath = quickSwitchRepos[nextIndex];
+      if (!nextPath) {
+        return;
+      }
+
+      event.preventDefault();
+      switchRepoPath(nextPath);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [nativeAvailable, quickSwitchRepos, switchRepoPath, trimmedNativeRepoPath]);
 
   useEffect(() => {
     if (usingNativeBackend && nativeStatus) {
@@ -538,8 +673,7 @@ export const SourceControl: React.FC = () => {
     if (!selectedTrustedRepo) {
       return;
     }
-    setNativeRepoPath(selectedTrustedRepo);
-    setError(null);
+    switchRepoPath(selectedTrustedRepo);
   };
 
   const handleForgetTrustedRepo = () => {
@@ -549,10 +683,25 @@ export const SourceControl: React.FC = () => {
 
     const forgotten = selectedTrustedRepo;
     removeTrustedRepo(forgotten);
+    removePinnedRepo(forgotten);
     if (normalizeRepoPath(nativeRepoPath) === forgotten) {
       setNativeRepoPath('');
     }
     setSelectedTrustedRepo((previous) => (previous === forgotten ? '' : previous));
+  };
+
+  const handleTogglePinCurrentRepo = () => {
+    if (!trimmedNativeRepoPath) {
+      setError('Enter a repository path before pinning it.');
+      return;
+    }
+
+    if (isCurrentRepoPinned) {
+      removePinnedRepo(trimmedNativeRepoPath);
+    } else {
+      addPinnedRepo(trimmedNativeRepoPath);
+    }
+    setError(null);
   };
 
   return (
@@ -619,7 +768,7 @@ export const SourceControl: React.FC = () => {
                   <option value="">Trusted repos</option>
                   {trustedRepos.map((repoPath) => (
                     <option key={repoPath} value={repoPath}>
-                      {repoPath}
+                      {pinnedRepos.includes(repoPath) ? `[PIN] ${repoPath}` : repoPath}
                     </option>
                   ))}
                 </>
@@ -640,6 +789,15 @@ export const SourceControl: React.FC = () => {
               disabled={!selectedTrustedRepo}
             >
               Forget
+            </button>
+            <button
+              type="button"
+              onClick={handleTogglePinCurrentRepo}
+              className="px-2 py-1 text-xs rounded border border-vscode-border hover:bg-vscode-hover transition-colors duration-150 disabled:opacity-50 flex items-center gap-1"
+              disabled={!trimmedNativeRepoPath}
+            >
+              {isCurrentRepoPinned ? <PinOff size={12} /> : <Pin size={12} />}
+              {isCurrentRepoPinned ? 'Unpin' : 'Pin'}
             </button>
           </div>
           <div className="flex gap-2">
@@ -668,13 +826,18 @@ export const SourceControl: React.FC = () => {
                   <option value="">Recent repos</option>
                   {recentRepos.map((repoPath) => (
                     <option key={repoPath} value={repoPath}>
-                      {repoPath}
+                      {pinnedRepos.includes(repoPath) ? `[PIN] ${repoPath}` : repoPath}
                     </option>
                   ))}
                 </>
               )}
             </select>
           </div>
+          {quickSwitchRepos.length > 0 && (
+            <div className="text-[10px] text-gray-500">
+              Quick switch: Ctrl/Cmd+Alt+1..9 or Ctrl/Cmd+Alt+ArrowUp/ArrowDown
+            </div>
+          )}
           <div className="text-[10px] text-gray-500">
             {usingNativeBackend ? 'Using native git backend.' : 'No repo path configured. Falling back to in-app git.'}
           </div>
