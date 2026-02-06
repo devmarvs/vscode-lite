@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, GitBranch, GitCommit, Minus, Plus, RefreshCw, X } from 'lucide-react';
 import { getGitChanges, useFileStore, type GitChange } from '../../store/useFileStore';
 import {
@@ -22,6 +22,48 @@ const STATUS_BADGE: Record<GitChange['type'], { label: string; className: string
 };
 
 const NATIVE_GIT_REPO_PATH_STORAGE_KEY = 'lite_vscode_native_git_repo_path';
+const NATIVE_GIT_TRUSTED_REPOS_STORAGE_KEY = 'lite_vscode_native_git_trusted_repos';
+const NATIVE_GIT_RECENT_REPOS_STORAGE_KEY = 'lite_vscode_native_git_recent_repos';
+const NATIVE_GIT_AUTO_REFRESH_INTERVAL_MS = 15000;
+const NATIVE_GIT_EDITOR_REFRESH_DEBOUNCE_MS = 1500;
+const NATIVE_GIT_MAX_RECENT_REPOS = 8;
+const NATIVE_GIT_MAX_TRUSTED_REPOS = 20;
+
+const normalizeRepoPath = (value: string) => value.trim();
+
+const dedupeRepoPaths = (paths: string[]) => {
+  const seen = new Set<string>();
+  return paths
+    .map((path) => normalizeRepoPath(path))
+    .filter(Boolean)
+    .filter((path) => {
+      if (seen.has(path)) {
+        return false;
+      }
+      seen.add(path);
+      return true;
+    });
+};
+
+const loadStoredRepoPaths = (storageKey: string) => {
+  if (typeof window === 'undefined') {
+    return [] as string[];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) {
+      return [] as string[];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [] as string[];
+    }
+    return dedupeRepoPaths(parsed.filter((value): value is string => typeof value === 'string'));
+  } catch {
+    return [] as string[];
+  }
+};
 
 const getErrorMessage = (error: unknown) => {
   if (error instanceof Error && error.message) {
@@ -71,6 +113,9 @@ export const SourceControl: React.FC = () => {
   const [nativeAvailable, setNativeAvailable] = useState(false);
   const [nativeBusy, setNativeBusy] = useState(false);
   const [nativeStatus, setNativeStatus] = useState<NativeGitStatus | null>(null);
+  const [trustedRepos, setTrustedRepos] = useState(() => loadStoredRepoPaths(NATIVE_GIT_TRUSTED_REPOS_STORAGE_KEY));
+  const [recentRepos, setRecentRepos] = useState(() => loadStoredRepoPaths(NATIVE_GIT_RECENT_REPOS_STORAGE_KEY));
+  const [selectedTrustedRepo, setSelectedTrustedRepo] = useState('');
   const [nativeRepoPath, setNativeRepoPath] = useState(() => {
     if (typeof window === 'undefined') {
       return '';
@@ -81,6 +126,8 @@ export const SourceControl: React.FC = () => {
       return '';
     }
   });
+  const nativeRefreshInFlightRef = useRef(false);
+  const skipEditorRefreshRef = useRef(true);
 
   const currentBranchState = gitBranches[gitCurrentBranch];
   const inMemoryChanges = useMemo(
@@ -98,24 +145,83 @@ export const SourceControl: React.FC = () => {
   const trimmedNativeRepoPath = nativeRepoPath.trim();
   const usingNativeBackend = nativeAvailable && Boolean(trimmedNativeRepoPath);
 
+  const addRecentRepo = useCallback((path: string) => {
+    const normalizedPath = normalizeRepoPath(path);
+    if (!normalizedPath) {
+      return;
+    }
+
+    setRecentRepos((previous) => {
+      if (previous[0] === normalizedPath) {
+        return previous;
+      }
+
+      const next = [normalizedPath, ...previous.filter((entry) => entry !== normalizedPath)].slice(
+        0,
+        NATIVE_GIT_MAX_RECENT_REPOS
+      );
+
+      if (next.length === previous.length && next.every((entry, index) => entry === previous[index])) {
+        return previous;
+      }
+
+      return next;
+    });
+  }, []);
+
+  const addTrustedRepo = useCallback((path: string) => {
+    const normalizedPath = normalizeRepoPath(path);
+    if (!normalizedPath) {
+      return;
+    }
+
+    setTrustedRepos((previous) => {
+      const next = [normalizedPath, ...previous.filter((entry) => entry !== normalizedPath)].slice(
+        0,
+        NATIVE_GIT_MAX_TRUSTED_REPOS
+      );
+
+      if (next.length === previous.length && next.every((entry, index) => entry === previous[index])) {
+        return previous;
+      }
+
+      return next;
+    });
+  }, []);
+
+  const removeTrustedRepo = useCallback((path: string) => {
+    const normalizedPath = normalizeRepoPath(path);
+    if (!normalizedPath) {
+      return;
+    }
+
+    setTrustedRepos((previous) => previous.filter((entry) => entry !== normalizedPath));
+  }, []);
+
   const refreshNativeStatus = useCallback(async () => {
     if (!usingNativeBackend) {
       setNativeStatus(null);
       return;
     }
+    if (nativeRefreshInFlightRef.current) {
+      return;
+    }
 
+    nativeRefreshInFlightRef.current = true;
     setNativeBusy(true);
     try {
       const status = await fetchNativeGitStatus(trimmedNativeRepoPath);
       setNativeStatus(status);
+      addRecentRepo(trimmedNativeRepoPath);
       setError(null);
     } catch (nativeError) {
       setNativeStatus(null);
       setError(getErrorMessage(nativeError));
     } finally {
+      nativeRefreshInFlightRef.current = false;
       setNativeBusy(false);
     }
-  }, [trimmedNativeRepoPath, usingNativeBackend]);
+  }, [addRecentRepo, trimmedNativeRepoPath, usingNativeBackend]);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,12 +254,98 @@ export const SourceControl: React.FC = () => {
   }, [nativeRepoPath]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(NATIVE_GIT_TRUSTED_REPOS_STORAGE_KEY, JSON.stringify(dedupeRepoPaths(trustedRepos)));
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [trustedRepos]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(NATIVE_GIT_RECENT_REPOS_STORAGE_KEY, JSON.stringify(dedupeRepoPaths(recentRepos)));
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [recentRepos]);
+
+  useEffect(() => {
+    if (selectedTrustedRepo) {
+      return;
+    }
+    if (trustedRepos.length === 0) {
+      return;
+    }
+    setSelectedTrustedRepo(trustedRepos[0]);
+  }, [selectedTrustedRepo, trustedRepos]);
+
+  useEffect(() => {
     if (!usingNativeBackend) {
       setNativeStatus(null);
+      skipEditorRefreshRef.current = true;
       return;
     }
     void refreshNativeStatus();
   }, [usingNativeBackend, refreshNativeStatus]);
+
+  useEffect(() => {
+    if (!usingNativeBackend) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void refreshNativeStatus();
+    }, NATIVE_GIT_AUTO_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [refreshNativeStatus, usingNativeBackend]);
+
+  useEffect(() => {
+    if (!usingNativeBackend) {
+      return;
+    }
+
+    const handleWindowFocus = () => {
+      void refreshNativeStatus();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshNativeStatus();
+      }
+    };
+
+    window.addEventListener('focus', handleWindowFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', handleWindowFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [refreshNativeStatus, usingNativeBackend]);
+
+  useEffect(() => {
+    if (!usingNativeBackend) {
+      return;
+    }
+    if (skipEditorRefreshRef.current) {
+      skipEditorRefreshRef.current = false;
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void refreshNativeStatus();
+    }, NATIVE_GIT_EDITOR_REFRESH_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [files, refreshNativeStatus, usingNativeBackend]);
 
   useEffect(() => {
     if (usingNativeBackend && nativeStatus) {
@@ -332,6 +524,37 @@ export const SourceControl: React.FC = () => {
     }
   };
 
+  const handleTrustCurrentRepo = () => {
+    if (!trimmedNativeRepoPath) {
+      setError('Enter a repository path before trusting it.');
+      return;
+    }
+    addTrustedRepo(trimmedNativeRepoPath);
+    setSelectedTrustedRepo(trimmedNativeRepoPath);
+    setError(null);
+  };
+
+  const handleUseTrustedRepo = () => {
+    if (!selectedTrustedRepo) {
+      return;
+    }
+    setNativeRepoPath(selectedTrustedRepo);
+    setError(null);
+  };
+
+  const handleForgetTrustedRepo = () => {
+    if (!selectedTrustedRepo) {
+      return;
+    }
+
+    const forgotten = selectedTrustedRepo;
+    removeTrustedRepo(forgotten);
+    if (normalizeRepoPath(nativeRepoPath) === forgotten) {
+      setNativeRepoPath('');
+    }
+    setSelectedTrustedRepo((previous) => (previous === forgotten ? '' : previous));
+  };
+
   return (
     <div className="flex flex-col h-full text-vscode-text">
       <div className="panel-header">
@@ -381,6 +604,76 @@ export const SourceControl: React.FC = () => {
             >
               Connect
             </button>
+          </div>
+          <div className="flex gap-2">
+            <select
+              className="flex-1 bg-vscode-input text-white text-xs px-2 py-1 border border-vscode-border focus:outline-none focus:border-vscode-statusBar rounded"
+              value={selectedTrustedRepo}
+              onChange={(event) => setSelectedTrustedRepo(event.target.value)}
+              disabled={trustedRepos.length === 0}
+            >
+              {trustedRepos.length === 0 ? (
+                <option value="">No trusted repos</option>
+              ) : (
+                <>
+                  <option value="">Trusted repos</option>
+                  {trustedRepos.map((repoPath) => (
+                    <option key={repoPath} value={repoPath}>
+                      {repoPath}
+                    </option>
+                  ))}
+                </>
+              )}
+            </select>
+            <button
+              type="button"
+              onClick={handleUseTrustedRepo}
+              className="px-2 py-1 text-xs rounded border border-vscode-border hover:bg-vscode-hover transition-colors duration-150 disabled:opacity-50"
+              disabled={!selectedTrustedRepo}
+            >
+              Use
+            </button>
+            <button
+              type="button"
+              onClick={handleForgetTrustedRepo}
+              className="px-2 py-1 text-xs rounded border border-vscode-border hover:bg-vscode-hover transition-colors duration-150 disabled:opacity-50"
+              disabled={!selectedTrustedRepo}
+            >
+              Forget
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleTrustCurrentRepo}
+              className="px-2 py-1 text-xs rounded border border-vscode-border hover:bg-vscode-hover transition-colors duration-150"
+            >
+              Trust Current Path
+            </button>
+            <select
+              className="flex-1 bg-vscode-input text-white text-xs px-2 py-1 border border-vscode-border focus:outline-none focus:border-vscode-statusBar rounded"
+              value=""
+              onChange={(event) => {
+                const nextRepoPath = normalizeRepoPath(event.target.value);
+                if (nextRepoPath) {
+                  setNativeRepoPath(nextRepoPath);
+                }
+              }}
+              disabled={recentRepos.length === 0}
+            >
+              {recentRepos.length === 0 ? (
+                <option value="">No recent repos</option>
+              ) : (
+                <>
+                  <option value="">Recent repos</option>
+                  {recentRepos.map((repoPath) => (
+                    <option key={repoPath} value={repoPath}>
+                      {repoPath}
+                    </option>
+                  ))}
+                </>
+              )}
+            </select>
           </div>
           <div className="text-[10px] text-gray-500">
             {usingNativeBackend ? 'Using native git backend.' : 'No repo path configured. Falling back to in-app git.'}
